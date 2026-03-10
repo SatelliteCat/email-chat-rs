@@ -4,9 +4,9 @@ resolver = "2"
 members = [
     "crates/encryption",
     "crates/email",
+    "crates/storage",
     # Будут добавлены по мере разработки:
     # "crates/core",
-    # "crates/storage",
     # "crates/platform",
     # "apps/desktop",
     # "apps/mobile",
@@ -56,15 +56,23 @@ image    = { version = "0.25" }
 async-imap       = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
 async-native-tls = { version = "0.5" }
 lettre           = { version = "0.11", default-features = false, features = [
-    "builder",
-    "tokio1",
-    "tokio1-native-tls",
-    "smtp-transport",
+    "builder", "tokio1", "tokio1-native-tls", "smtp-transport",
 ] }
 mail-parser      = { version = "0.9" }
 tokio-native-tls = { version = "0.3" }
 native-tls       = { version = "0.2" }
 base64           = { version = "0.22" }
+
+# SQLite
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-native-tls",
+    "sqlite",
+    "macros",
+    "migrate",
+    "chrono",
+    "uuid",
+] }
 
 # Логирование
 tracing            = { version = "0.1" }

@@ -1,0 +1,295 @@
+//! Модели данных — Rust-структуры соответствующие таблицам БД.
+//!
+//! Каждая структура — это строка таблицы. Используют `sqlx::FromRow`
+//! для автоматического маппинга из запросов.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+// ── Account ───────────────────────────────────────────────────────────────────
+
+/// Строка таблицы `accounts`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AccountRow {
+    pub id: String,
+    pub email: String,
+    pub provider: String,
+    pub imap_host: String,
+    pub imap_port: i64,
+    pub smtp_host: String,
+    pub smtp_port: i64,
+    pub echat_folder: String,
+    pub last_imap_uid: Option<i64>,
+    pub last_sync_at: Option<String>,
+    pub is_active: i64,
+    pub created_at: String,
+}
+
+/// Для создания нового аккаунта.
+#[derive(Debug, Clone)]
+pub struct NewAccount {
+    pub id: Uuid,
+    pub email: String,
+    pub provider: Provider,
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub echat_folder: String,
+}
+
+// ── Contact ───────────────────────────────────────────────────────────────────
+
+/// Строка таблицы `contacts`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ContactRow {
+    pub id: String,
+    pub account_id: String,
+    pub name: String,
+    pub email: String,
+    pub avatar: Option<Vec<u8>>,
+    pub status: String,
+    pub public_keys_json: Option<String>,
+    pub handshake_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Для создания нового контакта.
+#[derive(Debug, Clone)]
+pub struct NewContact {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub name: String,
+    pub email: String,
+    pub avatar: Option<Vec<u8>>,
+}
+
+/// Для обновления контакта.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateContact {
+    pub name: Option<String>,
+    pub avatar: Option<Option<Vec<u8>>>,   // Some(None) — удалить аватар
+    pub status: Option<ContactStatus>,
+    pub public_keys_json: Option<String>,
+}
+
+// ── Conversation ──────────────────────────────────────────────────────────────
+
+/// Строка таблицы `conversations`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ConversationRow {
+    pub id: String,
+    pub account_id: String,
+    pub kind: String,
+    pub contact_id: Option<String>,
+    pub group_name: Option<String>,
+    pub group_avatar: Option<Vec<u8>>,
+    pub last_msg_at: Option<String>,
+    pub last_msg_preview: Option<String>,
+    pub unread_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Строка таблицы `group_members`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct GroupMemberRow {
+    pub conversation_id: String,
+    pub contact_id: String,
+    pub role: String,
+    pub joined_at: String,
+    pub public_key_snapshot: Option<String>,
+}
+
+/// Для создания direct-беседы.
+#[derive(Debug, Clone)]
+pub struct NewDirectConversation {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub contact_id: Uuid,
+}
+
+/// Для создания группового чата.
+#[derive(Debug, Clone)]
+pub struct NewGroupConversation {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub name: String,
+    pub avatar: Option<Vec<u8>>,
+    pub members: Vec<NewGroupMember>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewGroupMember {
+    pub contact_id: Uuid,
+    pub role: GroupRole,
+    pub public_key_snapshot: Option<String>,
+}
+
+// ── Message ───────────────────────────────────────────────────────────────────
+
+/// Строка таблицы `messages`.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct MessageRow {
+    pub id: String,
+    pub conversation_id: String,
+    pub account_id: String,
+    pub from_email: String,
+    pub body: Option<String>,
+    pub kind: String,
+    pub status: String,
+    pub reply_to: Option<String>,
+    pub imap_uid: Option<i64>,
+    pub imap_folder: Option<String>,
+    pub sent_at: String,
+    pub received_at: Option<String>,
+    pub created_at: String,
+}
+
+/// Для вставки нового сообщения.
+#[derive(Debug, Clone)]
+pub struct NewMessage {
+    pub id: Uuid,
+    pub conversation_id: Uuid,
+    pub account_id: Uuid,
+    pub from_email: String,
+    pub body: Option<String>,
+    pub kind: MessageKind,
+    pub status: MessageStatus,
+    pub reply_to: Option<Uuid>,
+    pub imap_uid: Option<u32>,
+    pub imap_folder: Option<String>,
+    pub sent_at: DateTime<Utc>,
+}
+
+/// Запись UID для удаления с IMAP сервера.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ImapUidRecord {
+    pub imap_uid: Option<i64>,
+    pub imap_folder: Option<String>,
+}
+
+// ── Перечисления ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    MailRu,
+    Yandex,
+}
+
+impl Provider {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Provider::MailRu => "mailru",
+            Provider::Yandex => "yandex",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "mailru" => Some(Provider::MailRu),
+            "yandex" => Some(Provider::Yandex),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContactStatus {
+    Unregistered,
+    Pending,
+    Active,
+}
+
+impl ContactStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ContactStatus::Unregistered => "unregistered",
+            ContactStatus::Pending => "pending",
+            ContactStatus::Active => "active",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "unregistered" => Some(ContactStatus::Unregistered),
+            "pending" => Some(ContactStatus::Pending),
+            "active" => Some(ContactStatus::Active),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GroupRole {
+    Owner,
+    Admin,
+    Member,
+}
+
+impl GroupRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GroupRole::Owner => "owner",
+            GroupRole::Admin => "admin",
+            GroupRole::Member => "member",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageKind {
+    Text,
+    Handshake,
+    GroupEvent,
+}
+
+impl MessageKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MessageKind::Text => "text",
+            MessageKind::Handshake => "handshake",
+            MessageKind::GroupEvent => "group_event",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageStatus {
+    Queued,
+    Sending,
+    Sent,
+    Delivered,
+    Read,
+}
+
+impl MessageStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MessageStatus::Queued => "queued",
+            MessageStatus::Sending => "sending",
+            MessageStatus::Sent => "sent",
+            MessageStatus::Delivered => "delivered",
+            MessageStatus::Read => "read",
+        }
+    }
+}
+
+// ── Утилиты конвертации времени ───────────────────────────────────────────────
+
+pub fn now_iso() -> String {
+    Utc::now().to_rfc3339()
+}
+
+pub fn parse_dt(s: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
+}
