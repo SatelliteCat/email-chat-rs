@@ -85,7 +85,7 @@ impl Database {
         let pool = SqlitePool::connect_with(options).await?;
 
         // Применяем все миграции из папки migrations/
-        sqlx::migrate!("src/migrations").run(&pool).await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
 
         info!("БД готова, миграции применены");
         Ok(Self { pool })
@@ -94,7 +94,7 @@ impl Database {
     /// In-memory БД для тестов.
     pub async fn open_in_memory() -> Result<Self> {
         let pool = SqlitePool::connect(":memory:").await?;
-        sqlx::migrate!("src/migrations").run(&pool).await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
         Ok(Self { pool })
     }
 
