@@ -1,0 +1,34 @@
+[package]
+name        = "encryption"
+description = "E2E encryption for email-chat: keypair, cipher, handshake, key export"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+# repository.workspace = true
+
+[dependencies]
+# Крипто
+x25519-dalek     = { workspace = true }
+ed25519-dalek    = { workspace = true }
+chacha20poly1305 = { workspace = true }
+argon2           = { workspace = true }
+rand             = { workspace = true }
+rand_core        = { workspace = true }
+sha2     = { workspace = true }
+hkdf     = { workspace = true }
+bip39            = { workspace = true }
+zeroize          = { workspace = true }
+
+# QR
+qrcode = { workspace = true }
+image  = { workspace = true }
+
+# Утилиты
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+chrono      = { workspace = true }
+base64      = "0.22"
+
+[dev-dependencies]
+hex = { workspace = true }
