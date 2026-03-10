@@ -1,0 +1,37 @@
+[package]
+name        = "email"
+description = "IMAP/SMTP transport layer for email-chat"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+# repository.workspace = true
+
+[dependencies]
+# Внутренние
+encryption = { path = "../encryption" }
+
+# Async
+tokio            = { workspace = true }
+
+# IMAP / SMTP
+async-imap       = { workspace = true }
+async-native-tls = { workspace = true }
+lettre           = { workspace = true }
+mail-parser      = { workspace = true }
+tokio-native-tls = { workspace = true }
+native-tls       = { workspace = true }
+
+# Сериализация
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+base64      = { workspace = true }
+
+# Утилиты
+thiserror = { workspace = true }
+chrono    = { workspace = true }
+uuid      = { workspace = true }
+tracing   = { workspace = true }
+
+[dev-dependencies]
+tokio-test         = { workspace = true }
+tracing-subscriber = { workspace = true }

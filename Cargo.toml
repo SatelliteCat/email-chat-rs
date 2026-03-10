@@ -3,9 +3,9 @@ resolver = "2"
 
 members = [
     "crates/encryption",
+    "crates/email",
     # Будут добавлены по мере разработки:
     # "crates/core",
-    # "crates/email",
     # "crates/storage",
     # "crates/platform",
     # "apps/desktop",
@@ -18,8 +18,6 @@ edition     = "2024"
 license     = "MIT"
 # repository  = "https://github.com/yourname/email-chat"
 
-# Общие зависимости — версии задаём один раз здесь,
-# крейты подключают через workspace = true
 [workspace.dependencies]
 # Async
 tokio        = { version = "1",    features = ["full"] }
@@ -54,5 +52,24 @@ zeroize            = { version = "1",   features = ["derive"] }
 qrcode   = { version = "0.14" }
 image    = { version = "0.25" }
 
+# Email — IMAP/SMTP
+async-imap       = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
+async-native-tls = { version = "0.5" }
+lettre           = { version = "0.11", default-features = false, features = [
+    "builder",
+    "tokio1",
+    "tokio1-native-tls",
+    "smtp-transport",
+] }
+mail-parser      = { version = "0.9" }
+tokio-native-tls = { version = "0.3" }
+native-tls       = { version = "0.2" }
+base64           = { version = "0.22" }
+
+# Логирование
+tracing            = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 # Тесты
-hex = { version = "0.4" }
+hex        = { version = "0.4" }
+tokio-test = { version = "0.4" }
