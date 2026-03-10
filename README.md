@@ -11,3 +11,5 @@
 Тестирование
 
 `$env:DATABASE_URL="sqlite://crates/storage/storage.db"; cargo test -p storage`
+
+или `export DATABASE_URL="sqlite::memory:"; cargo test -p storage`
