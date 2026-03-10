@@ -1,1 +1,4 @@
 /target
+
+crates/storage/storage.db
+/.sqlx
