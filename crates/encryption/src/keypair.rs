@@ -49,14 +49,14 @@ pub struct PublicKeys {
 impl PublicKeys {
     /// Кодирует публичные ключи в base64 для передачи в handshake.
     pub fn to_base64(&self) -> Result<String> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
+        use base64::{Engine, engine::general_purpose::STANDARD};
         let bytes = serde_json::to_vec(self)?;
         Ok(STANDARD.encode(bytes))
     }
 
     /// Декодирует из base64.
     pub fn from_base64(s: &str) -> Result<Self> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
+        use base64::{Engine, engine::general_purpose::STANDARD};
         let bytes = STANDARD
             .decode(s)
             .map_err(|e| Error::InvalidPublicKey(e.to_string()))?;
@@ -118,18 +118,12 @@ impl IdentityKeypair {
     }
 
     /// Возвращает X25519 приватный ключ (для DH).
-    /// Только для использования внутри крейта encryption.
-    pub(crate) fn secret_key(&self) -> &X25519SecretKey {
+    pub fn secret_key(&self) -> &X25519SecretKey {
         &self.x25519_secret
     }
 
-    /// Возвращает Ed25519 signing key (для подписи handshake).
-    pub(crate) fn signing_key(&self) -> &ed25519_dalek::SigningKey {
-        &self.ed25519_signing
-    }
-
-    /// Возвращает seed для экспорта (только через защищённый export модуль).
-    pub(crate) fn seed(&self) -> &KeySeed {
+    /// Возвращает seed для экспорта.
+    pub fn seed(&self) -> &KeySeed {
         &self.seed
     }
 

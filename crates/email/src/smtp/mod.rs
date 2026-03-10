@@ -6,19 +6,19 @@
 //! разрывают idle SMTP соединения через 5-10 минут).
 
 use lettre::{
-    message::{header::ContentType, Mailbox, MultiPart, SinglePart},
+    Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    message::Mailbox,
     transport::smtp::{
         authentication::Credentials,
         client::{Tls, TlsParameters},
     },
-    Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
 };
 use tracing::info;
 
 use crate::{
+    Error, Result,
     providers::{ProviderConfig, TlsMode},
     types::OutgoingMessage,
-    Error, Result,
 };
 
 /// SMTP соединение.
@@ -26,7 +26,7 @@ use crate::{
 /// Внутри хранит конфигурацию для построения транспорта при отправке.
 /// Lettre сам управляет connection pool'ом.
 pub struct SmtpConnection {
-    config: ProviderConfig,
+    _config: ProviderConfig,
 }
 
 impl SmtpConnection {
@@ -35,11 +35,10 @@ impl SmtpConnection {
     pub async fn connect(config: &ProviderConfig) -> Result<Self> {
         // Проверяем что можем построить транспорт
         build_transport(config)?;
-        info!(
-            "SMTP транспорт подготовлен для {}",
-            config.smtp.host
-        );
-        Ok(Self { config: config.clone() })
+        info!("SMTP транспорт подготовлен для {}", config.smtp.host);
+        Ok(Self {
+            _config: config.clone(),
+        })
     }
 
     /// Отправляет письмо.
@@ -47,23 +46,16 @@ impl SmtpConnection {
         let transport = build_transport(config)?;
         let email = build_email(msg, config)?;
 
-        transport
-            .send(email)
-            .await
-            .map_err(|e| {
-                let s = e.to_string();
-                if s.contains("535") || s.contains("Authentication") {
-                    Error::Auth
-                } else {
-                    Error::Smtp(s)
-                }
-            })?;
+        transport.send(email).await.map_err(|e| {
+            let s = e.to_string();
+            if s.contains("535") || s.contains("Authentication") {
+                Error::Auth
+            } else {
+                Error::Smtp(s)
+            }
+        })?;
 
-        info!(
-            "Письмо отправлено: {} → {:?}",
-            msg.from,
-            msg.to
-        );
+        info!("Письмо отправлено: {} → {:?}", msg.from, msg.to);
         Ok(())
     }
 }
@@ -71,16 +63,11 @@ impl SmtpConnection {
 // ── Внутренние функции ────────────────────────────────────────────────────────
 
 /// Строит SMTP транспорт из конфигурации.
-fn build_transport(
-    config: &ProviderConfig,
-) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
-    let creds = Credentials::new(
-        config.email.clone(),
-        config.app_password.clone(),
-    );
+fn build_transport(config: &ProviderConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
+    let creds = Credentials::new(config.email.clone(), config.app_password.clone());
 
-    let tls_params = TlsParameters::new(config.smtp.host.clone())
-        .map_err(|e| Error::Tls(e.to_string()))?;
+    let tls_params =
+        TlsParameters::new(config.smtp.host.clone()).map_err(|e| Error::Tls(e.to_string()))?;
 
     let transport = match config.smtp.tls {
         TlsMode::Tls => {
@@ -105,10 +92,7 @@ fn build_transport(
 }
 
 /// Строит lettre Message из OutgoingMessage.
-fn build_email(
-    msg: &OutgoingMessage,
-    _config: &ProviderConfig,
-) -> Result<Message> {
+fn build_email(msg: &OutgoingMessage, _config: &ProviderConfig) -> Result<Message> {
     // Парсим from адрес
     let from_addr: Address = msg
         .from
@@ -119,18 +103,15 @@ fn build_email(
     let from_mailbox = Mailbox::new(None, from_addr);
 
     // Строим сообщение
-    let mut builder = Message::builder()
-        .from(from_mailbox)
-        .subject(&msg.subject);
+    let mut builder = Message::builder().from(from_mailbox).subject(&msg.subject);
 
     // Добавляем получателей
     for to_addr in &msg.to {
-        let addr: Address =
-            to_addr
-                .parse()
-                .map_err(|e: lettre::address::AddressError| {
-                    Error::Smtp(format!("неверный to адрес '{}': {}", to_addr, e))
-                })?;
+        let addr: Address = to_addr
+            .parse()
+            .map_err(|e: lettre::address::AddressError| {
+                Error::Smtp(format!("неверный to адрес '{}': {}", to_addr, e))
+            })?;
         builder = builder.to(Mailbox::new(None, addr));
     }
 

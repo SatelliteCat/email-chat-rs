@@ -20,14 +20,15 @@
 use std::collections::HashMap;
 
 use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
     ChaCha20Poly1305, Key, Nonce,
+    aead::{Aead, AeadCore, KeyInit, OsRng},
 };
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use serde_with::{Bytes, serde_as};
 use x25519_dalek::PublicKey as X25519PublicKey;
 
-use crate::{keypair::IdentityKeypair, session, Error, Result};
+use crate::{Error, Result, keypair::IdentityKeypair, session};
 
 /// Зашифрованное групповое сообщение.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,25 +46,25 @@ pub struct GroupEncryptedPayload {
 
 impl GroupEncryptedPayload {
     pub fn to_base64(&self) -> Result<String> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
+        use base64::{Engine, engine::general_purpose::STANDARD};
         let bytes = serde_json::to_vec(self)?;
         Ok(STANDARD.encode(bytes))
     }
 
     pub fn from_base64(s: &str) -> Result<Self> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
-        let bytes = STANDARD
-            .decode(s.trim())
-            .map_err(|_| Error::Decrypt)?;
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        let bytes = STANDARD.decode(s.trim()).map_err(|_| Error::Decrypt)?;
         serde_json::from_slice(&bytes).map_err(Error::Serialization)
     }
 }
 
 /// Session key зашифрованный для одного участника.
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedSessionKey {
     pub nonce: [u8; 12],
     /// 32 байта session_key + 16 байт Poly1305 tag = 48 байт
+    #[serde_as(as = "Bytes")]
     pub ciphertext: [u8; 48],
 }
 
@@ -107,11 +108,7 @@ pub fn encrypt(
 
     for member in members {
         let their_public = X25519PublicKey::from(member.public_key_bytes);
-        let shared = session::derive_shared_secret(
-            sender.secret_key(),
-            &their_public,
-            &context,
-        )?;
+        let shared = session::derive_shared_secret(sender.secret_key(), &their_public, &context)?;
 
         let wrap_key = Key::from_slice(shared.as_bytes());
         let wrap_cipher = ChaCha20Poly1305::new(wrap_key);
@@ -169,11 +166,7 @@ pub fn decrypt(
     // 2. Восстанавливаем shared secret с отправителем
     let context = format!("group-{}", group_id);
     let sender_public = X25519PublicKey::from(*sender_public_key_bytes);
-    let shared = session::derive_shared_secret(
-        recipient.secret_key(),
-        &sender_public,
-        &context,
-    )?;
+    let shared = session::derive_shared_secret(recipient.secret_key(), &sender_public, &context)?;
 
     // 3. Расшифровываем session_key
     let wrap_key = Key::from_slice(shared.as_bytes());

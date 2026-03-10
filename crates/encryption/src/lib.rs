@@ -21,15 +21,17 @@
 //! let alice = IdentityKeypair::generate();
 //! let bob   = IdentityKeypair::generate();
 //!
-//! // Вычисляют общий секрет (X25519 DH)
+//! // Вычисляют общий секрет (X25519 DH) с контекстом
 //! let alice_shared = session::derive_shared_secret(
 //!     alice.secret_key(),
 //!     bob.public_key(),
-//! );
+//!     "direct-chat",
+//! ).unwrap();
 //! let bob_shared = session::derive_shared_secret(
 //!     bob.secret_key(),
 //!     alice.public_key(),
-//! );
+//!     "direct-chat",
+//! ).unwrap();
 //! assert_eq!(alice_shared, bob_shared);
 //!
 //! // Alice шифрует
@@ -86,6 +88,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// Удобный реэкспорт основных типов
 pub mod prelude {
+    pub use crate::Error;
+    pub use crate::Result;
     pub use crate::cipher::{self, EncryptedPayload};
     pub use crate::disguise;
     pub use crate::export::{ExportFormat, KeyExport};
@@ -93,6 +97,4 @@ pub mod prelude {
     pub use crate::handshake::{HandshakeMessage, HandshakeState};
     pub use crate::keypair::IdentityKeypair;
     pub use crate::session;
-    pub use crate::Error;
-    pub use crate::Result;
 }

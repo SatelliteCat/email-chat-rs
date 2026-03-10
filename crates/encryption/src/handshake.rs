@@ -19,10 +19,11 @@
 //! replay-атаки и подмену ключей.
 
 use serde::{Deserialize, Serialize};
+use serde_with::{Bytes, serde_as};
 
 use crate::{
-    keypair::{IdentityKeypair, PublicKeys},
     Error, Result,
+    keypair::{IdentityKeypair, PublicKeys},
 };
 
 /// Тип handshake сообщения.
@@ -35,6 +36,7 @@ pub enum HandshakeKind {
 }
 
 /// Handshake-сообщение — кладётся в тело письма вместо EncryptedPayload.
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HandshakeMessage {
     /// Версия протокола
@@ -44,6 +46,7 @@ pub struct HandshakeMessage {
     /// Публичные ключи отправителя
     pub public_keys: PublicKeys,
     /// Ed25519 подпись (покрывает public_keys + timestamp_secs)
+    #[serde_as(as = "Bytes")]
     pub signature: [u8; 64],
     /// Unix timestamp в секундах (для защиты от replay)
     pub timestamp_secs: u64,
@@ -102,14 +105,14 @@ impl HandshakeMessage {
 
     /// Кодирует в base64 для вставки в тело письма.
     pub fn to_base64(&self) -> Result<String> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
+        use base64::{Engine, engine::general_purpose::STANDARD};
         let bytes = serde_json::to_vec(self)?;
         Ok(STANDARD.encode(bytes))
     }
 
     /// Декодирует из base64.
     pub fn from_base64(s: &str) -> Result<Self> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
+        use base64::{Engine, engine::general_purpose::STANDARD};
         let bytes = STANDARD
             .decode(s.trim())
             .map_err(|_| Error::InvalidPublicKey("base64 decode failed".into()))?;

@@ -12,10 +12,10 @@ encryption = { path = "../encryption" }
 
 # Async
 tokio            = { workspace = true }
+futures-util     = "0.3"
 
 # IMAP / SMTP
 async-imap       = { workspace = true }
-async-native-tls = { workspace = true }
 lettre           = { workspace = true }
 mail-parser      = { workspace = true }
 tokio-native-tls = { workspace = true }

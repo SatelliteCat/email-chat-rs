@@ -7,6 +7,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::{
+    Error, Result,
     events::{ChatEvent, EventBus},
     models::{
         conversation::Conversation,
@@ -17,7 +18,6 @@ use crate::{
         storage::{CreateMessage, DynStorage},
     },
     services::account::AccountService,
-    Error, Result,
 };
 
 pub struct ChatService {
@@ -37,7 +37,13 @@ impl ChatService {
         events: EventBus,
         app_download_url: String,
     ) -> Self {
-        Self { storage, email, account_svc, events, app_download_url }
+        Self {
+            storage,
+            email,
+            account_svc,
+            events,
+            app_download_url,
+        }
     }
 
     // ── Отправка ─────────────────────────────────────────────────────────────
@@ -60,7 +66,9 @@ impl ChatService {
         let contact = self.storage.get_contact(contact_id).await?;
 
         // Находим или создаём беседу
-        let conv = self.get_or_create_direct_conversation(account_id, contact_id).await?;
+        let conv = self
+            .get_or_create_direct_conversation(account_id, contact_id)
+            .await?;
 
         let msg_id = Uuid::new_v4();
         let sent_at = Utc::now();
@@ -69,20 +77,17 @@ impl ChatService {
         let (status, imap_uid, imap_folder) = match &contact.public_keys {
             None => {
                 // Контакт без приложения — ставим в очередь и отправляем invite
-                self.send_invite(&account.email, &contact.email, &body).await?;
+                self.send_invite(&account.email, &contact.email, &body)
+                    .await?;
                 (MessageStatus::Queued, None, None)
             }
             Some(their_keys) => {
                 // Контакт активен — шифруем и отправляем
-                let ciphertext = self.encrypt_direct(
-                    account_id,
-                    their_keys,
-                    conv.id,
-                    msg_id,
-                    &body,
-                    reply_to,
-                    &sent_at,
-                ).await?;
+                let ciphertext = self
+                    .encrypt_direct(
+                        account_id, their_keys, conv.id, msg_id, &body, reply_to, &sent_at,
+                    )
+                    .await?;
 
                 self.email
                     .send(OutgoingEmail {
@@ -109,8 +114,8 @@ impl ChatService {
                 kind: MessageKind::Text,
                 status: status.clone(),
                 reply_to,
-                imap_uid,
-                imap_folder,
+                imap_uid: imap_uid.clone(),
+                imap_folder: imap_folder.clone(),
                 sent_at,
             })
             .await?;
@@ -147,7 +152,9 @@ impl ChatService {
         before: Option<chrono::DateTime<Utc>>,
         limit: usize,
     ) -> Result<Vec<Message>> {
-        self.storage.get_message_history(conv_id, before, limit).await
+        self.storage
+            .get_message_history(conv_id, before, limit)
+            .await
     }
 
     /// Список всех бесед аккаунта.
@@ -166,11 +173,7 @@ impl ChatService {
     ///
     /// `delete_from_server` — если true, удаляем письма с почтового сервера.
     /// Рекомендуется всегда true для приватности.
-    pub async fn delete_conversation(
-        &self,
-        conv_id: Uuid,
-        delete_from_server: bool,
-    ) -> Result<()> {
+    pub async fn delete_conversation(&self, conv_id: Uuid, delete_from_server: bool) -> Result<()> {
         if delete_from_server {
             // Получаем все IMAP UID
             let uid_entries = self.storage.get_imap_uids_for_deletion(conv_id).await?;
@@ -179,10 +182,7 @@ impl ChatService {
             let mut by_folder: std::collections::HashMap<String, Vec<u32>> =
                 std::collections::HashMap::new();
             for entry in uid_entries {
-                by_folder
-                    .entry(entry.folder)
-                    .or_default()
-                    .push(entry.uid);
+                by_folder.entry(entry.folder).or_default().push(entry.uid);
             }
 
             // Удаляем с IMAP пачками по папкам
@@ -223,14 +223,22 @@ impl ChatService {
         }
 
         // Находим контакт по email
-        let contact = self.storage.get_contact_by_email(account_id, &from_email).await?;
+        let contact = self
+            .storage
+            .get_contact_by_email(account_id, &from_email)
+            .await?;
 
         // Находим беседу
-        let conv = match self.storage.find_direct_conversation(account_id, contact.id).await? {
+        let conv = match self
+            .storage
+            .find_direct_conversation(account_id, contact.id)
+            .await?
+        {
             Some(c) => c,
             None => {
                 // Создаём беседу автоматически
-                self.get_or_create_direct_conversation(account_id, contact.id).await?
+                self.get_or_create_direct_conversation(account_id, contact.id)
+                    .await?
             }
         };
 
@@ -335,8 +343,8 @@ impl ChatService {
             "reply_to": reply_to,
             "protocol_version": 1,
         });
-        let envelope_bytes = serde_json::to_vec(&envelope)
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        let envelope_bytes =
+            serde_json::to_vec(&envelope).map_err(|e| Error::Internal(e.to_string()))?;
 
         let payload = encryption::cipher::encrypt(&envelope_bytes, &shared_secret)
             .map_err(|e| Error::Encryption(e.to_string()))?;
@@ -345,7 +353,7 @@ impl ChatService {
     }
 
     /// Отправляет invite-письмо (контакт без приложения).
-    async fn send_invite(&self, from: &str, to: &str, body: &str) -> Result<()> {
+    async fn send_invite(&self, from: &str, to: &str, _body: &str) -> Result<()> {
         // Создаём placeholder payload — расшифровать невозможно без ключа
         // После handshake queued сообщения будут отправлены повторно
         let invite_body = format!(

@@ -29,6 +29,8 @@ serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 chrono      = { workspace = true }
 base64      = "0.22"
+hex         = { workspace = true }
+serde_with  = "3"
 
 [dev-dependencies]
 hex = { workspace = true }

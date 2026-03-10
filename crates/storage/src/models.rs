@@ -45,14 +45,23 @@ pub struct NewAccount {
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ContactRow {
     pub id: String,
+    #[sqlx(default)]
     pub account_id: String,
+    #[sqlx(default)]
     pub name: String,
+    #[sqlx(default)]
     pub email: String,
+    #[sqlx(default)]
     pub avatar: Option<Vec<u8>>,
+    #[sqlx(default)]
     pub status: String,
+    #[sqlx(default)]
     pub public_keys_json: Option<String>,
+    #[sqlx(default)]
     pub handshake_at: Option<String>,
+    #[sqlx(default)]
     pub created_at: String,
+    #[sqlx(default)]
     pub updated_at: String,
 }
 
@@ -70,7 +79,7 @@ pub struct NewContact {
 #[derive(Debug, Clone, Default)]
 pub struct UpdateContact {
     pub name: Option<String>,
-    pub avatar: Option<Option<Vec<u8>>>,   // Some(None) — удалить аватар
+    pub avatar: Option<Option<Vec<u8>>>, // Some(None) — удалить аватар
     pub status: Option<ContactStatus>,
     pub public_keys_json: Option<String>,
 }
@@ -81,25 +90,39 @@ pub struct UpdateContact {
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ConversationRow {
     pub id: String,
+    #[sqlx(default)]
     pub account_id: String,
+    #[sqlx(default)]
     pub kind: String,
+    #[sqlx(default)]
     pub contact_id: Option<String>,
+    #[sqlx(default)]
     pub group_name: Option<String>,
+    #[sqlx(default)]
     pub group_avatar: Option<Vec<u8>>,
+    #[sqlx(default)]
     pub last_msg_at: Option<String>,
+    #[sqlx(default)]
     pub last_msg_preview: Option<String>,
     pub unread_count: i64,
+    #[sqlx(default)]
     pub created_at: String,
+    #[sqlx(default)]
     pub updated_at: String,
 }
 
 /// Строка таблицы `group_members`.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct GroupMemberRow {
+    #[sqlx(default)]
     pub conversation_id: String,
+    #[sqlx(default)]
     pub contact_id: String,
+    #[sqlx(default)]
     pub role: String,
+    #[sqlx(default)]
     pub joined_at: String,
+    #[sqlx(default)]
     pub public_key_snapshot: Option<String>,
 }
 
@@ -137,13 +160,18 @@ pub struct MessageRow {
     pub conversation_id: String,
     pub account_id: String,
     pub from_email: String,
+    #[sqlx(default)]
     pub body: Option<String>,
     pub kind: String,
     pub status: String,
+    #[sqlx(default)]
     pub reply_to: Option<String>,
+    #[sqlx(default)]
     pub imap_uid: Option<i64>,
+    #[sqlx(default)]
     pub imap_folder: Option<String>,
     pub sent_at: String,
+    #[sqlx(default)]
     pub received_at: Option<String>,
     pub created_at: String,
 }
@@ -167,7 +195,9 @@ pub struct NewMessage {
 /// Запись UID для удаления с IMAP сервера.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ImapUidRecord {
+    #[sqlx(default)]
     pub imap_uid: Option<i64>,
+    #[sqlx(default)]
     pub imap_folder: Option<String>,
 }
 

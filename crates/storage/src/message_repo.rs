@@ -7,8 +7,8 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
-    models::{ImapUidRecord, MessageRow, MessageStatus, NewMessage, now_iso},
     Error, Result,
+    models::{ImapUidRecord, MessageRow, MessageStatus, NewMessage, now_iso},
 };
 
 #[derive(Clone)]
@@ -85,7 +85,8 @@ impl MessageRepo {
         let rows = if let Some(before) = before_sent_at {
             sqlx::query_as!(
                 MessageRow,
-                r#"SELECT * FROM messages
+                r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, created_at AS "created_at!"
+                   FROM messages
                    WHERE conversation_id = ? AND sent_at < ?
                    ORDER BY sent_at DESC
                    LIMIT ?"#,
@@ -98,7 +99,8 @@ impl MessageRepo {
         } else {
             sqlx::query_as!(
                 MessageRow,
-                r#"SELECT * FROM messages
+                r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, created_at AS "created_at!"
+                   FROM messages
                    WHERE conversation_id = ?
                    ORDER BY sent_at DESC
                    LIMIT ?"#,
@@ -144,12 +146,7 @@ impl MessageRepo {
     }
 
     /// Сохраняет IMAP UID после успешной отправки (письмо появилось в Sent).
-    pub async fn set_imap_uid(
-        &self,
-        id: Uuid,
-        uid: u32,
-        folder: &str,
-    ) -> Result<()> {
+    pub async fn set_imap_uid(&self, id: Uuid, uid: u32, folder: &str) -> Result<()> {
         let id_str = id.to_string();
         let uid_i64 = uid as i64;
         sqlx::query!(
@@ -168,10 +165,7 @@ impl MessageRepo {
     /// Возвращает все IMAP UID сообщений беседы для удаления с сервера.
     ///
     /// Группирует по папкам (могут быть в EChat и в Sent).
-    pub async fn get_imap_uids_for_deletion(
-        &self,
-        conv_id: Uuid,
-    ) -> Result<Vec<ImapUidRecord>> {
+    pub async fn get_imap_uids_for_deletion(&self, conv_id: Uuid) -> Result<Vec<ImapUidRecord>> {
         let id_str = conv_id.to_string();
         Ok(sqlx::query_as!(
             ImapUidRecord,
@@ -190,13 +184,10 @@ impl MessageRepo {
     /// Вызывается ПОСЛЕ удаления писем с IMAP сервера.
     pub async fn delete_conversation_messages(&self, conv_id: Uuid) -> Result<u64> {
         let id_str = conv_id.to_string();
-        let rows = sqlx::query!(
-            "DELETE FROM messages WHERE conversation_id = ?",
-            id_str,
-        )
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
+        let rows = sqlx::query!("DELETE FROM messages WHERE conversation_id = ?", id_str,)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
         Ok(rows)
     }
 
@@ -207,7 +198,8 @@ impl MessageRepo {
         let id_str = account_id.to_string();
         Ok(sqlx::query_as!(
             MessageRow,
-            r#"SELECT * FROM messages
+            r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, created_at AS "created_at!"
+               FROM messages
                WHERE account_id = ? AND status = 'queued'
                ORDER BY sent_at ASC"#,
             id_str,

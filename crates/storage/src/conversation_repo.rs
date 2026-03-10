@@ -4,11 +4,11 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
+    Error, Result,
     models::{
         ConversationRow, GroupMemberRow, NewDirectConversation, NewGroupConversation,
         NewGroupMember, now_iso,
     },
-    Error, Result,
 };
 
 #[derive(Clone)]
@@ -112,7 +112,7 @@ impl ConversationRepo {
         let id_str = id.to_string();
         sqlx::query_as!(
             ConversationRow,
-            "SELECT * FROM conversations WHERE id = ?",
+            r#"SELECT id AS "id!", account_id AS "account_id!", kind AS "kind!", contact_id, group_name, group_avatar, last_msg_at, last_msg_preview, unread_count, created_at AS "created_at!", updated_at AS "updated_at!" FROM conversations WHERE id = ?"#,
             id_str,
         )
         .fetch_optional(&self.pool)
@@ -131,8 +131,7 @@ impl ConversationRepo {
 
         Ok(sqlx::query_as!(
             ConversationRow,
-            r#"SELECT * FROM conversations
-               WHERE account_id = ? AND kind = 'direct' AND contact_id = ?"#,
+            r#"SELECT id AS "id!", account_id AS "account_id!", kind AS "kind!", contact_id, group_name, group_avatar, last_msg_at, last_msg_preview, unread_count, created_at AS "created_at!", updated_at AS "updated_at!" FROM conversations WHERE account_id = ? AND kind = 'direct' AND contact_id = ?"#,
             account_id_str,
             contact_id_str,
         )
@@ -145,9 +144,7 @@ impl ConversationRepo {
         let account_id_str = account_id.to_string();
         Ok(sqlx::query_as!(
             ConversationRow,
-            r#"SELECT * FROM conversations
-               WHERE account_id = ?
-               ORDER BY COALESCE(last_msg_at, created_at) DESC"#,
+            r#"SELECT id AS "id!", account_id AS "account_id!", kind AS "kind!", contact_id, group_name, group_avatar, last_msg_at, last_msg_preview, unread_count, created_at AS "created_at!", updated_at AS "updated_at!" FROM conversations WHERE account_id = ? ORDER BY COALESCE(last_msg_at, created_at) DESC"#,
             account_id_str,
         )
         .fetch_all(&self.pool)
@@ -159,7 +156,7 @@ impl ConversationRepo {
         let id_str = conv_id.to_string();
         Ok(sqlx::query_as!(
             GroupMemberRow,
-            "SELECT * FROM group_members WHERE conversation_id = ?",
+            r#"SELECT conversation_id AS "conversation_id!", contact_id AS "contact_id!", role AS "role!", joined_at AS "joined_at!", public_key_snapshot FROM group_members WHERE conversation_id = ?"#,
             id_str,
         )
         .fetch_all(&self.pool)

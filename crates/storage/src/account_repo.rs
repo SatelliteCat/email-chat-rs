@@ -7,8 +7,8 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
-    models::{AccountRow, NewAccount, now_iso},
     Error, Result,
+    models::{AccountRow, NewAccount, now_iso},
 };
 
 #[derive(Clone)]
@@ -26,6 +26,8 @@ impl AccountRepo {
         let id = account.id.to_string();
         let provider = account.provider.as_str();
         let now = now_iso();
+        let imap_port_i64 = account.imap_port as i64;
+        let smtp_port_i64 = account.smtp_port as i64;
 
         sqlx::query!(
             r#"
@@ -38,9 +40,9 @@ impl AccountRepo {
             account.email,
             provider,
             account.imap_host,
-            account.imap_port as i64,
+            imap_port_i64,
             account.smtp_host,
-            account.smtp_port as i64,
+            smtp_port_i64,
             account.echat_folder,
             now,
         )
@@ -62,7 +64,7 @@ impl AccountRepo {
         let id_str = id.to_string();
         sqlx::query_as!(
             AccountRow,
-            "SELECT * FROM accounts WHERE id = ?",
+            r#"SELECT id AS "id!", email AS "email!", provider AS "provider!", imap_host AS "imap_host!", imap_port, smtp_host AS "smtp_host!", smtp_port, echat_folder AS "echat_folder!", last_imap_uid, last_sync_at, is_active, created_at AS "created_at!" FROM accounts WHERE id = ?"#,
             id_str
         )
         .fetch_optional(&self.pool)
@@ -74,7 +76,7 @@ impl AccountRepo {
     pub async fn get_by_email(&self, email: &str) -> Result<AccountRow> {
         sqlx::query_as!(
             AccountRow,
-            "SELECT * FROM accounts WHERE email = ?",
+            r#"SELECT id AS "id!", email AS "email!", provider AS "provider!", imap_host AS "imap_host!", imap_port, smtp_host AS "smtp_host!", smtp_port, echat_folder AS "echat_folder!", last_imap_uid, last_sync_at, is_active, created_at AS "created_at!" FROM accounts WHERE email = ?"#,
             email
         )
         .fetch_optional(&self.pool)
@@ -84,17 +86,18 @@ impl AccountRepo {
 
     /// Возвращает все аккаунты.
     pub async fn list(&self) -> Result<Vec<AccountRow>> {
-        Ok(sqlx::query_as!(AccountRow, "SELECT * FROM accounts ORDER BY created_at")
+        Ok(
+            sqlx::query_as!(
+                AccountRow,
+                r#"SELECT id AS "id!", email AS "email!", provider AS "provider!", imap_host AS "imap_host!", imap_port, smtp_host AS "smtp_host!", smtp_port, echat_folder AS "echat_folder!", last_imap_uid, last_sync_at, is_active, created_at AS "created_at!" FROM accounts ORDER BY created_at"#
+            )
             .fetch_all(&self.pool)
-            .await?)
+            .await?,
+        )
     }
 
     /// Обновляет последний полученный IMAP UID и время синхронизации.
-    pub async fn update_sync_state(
-        &self,
-        id: Uuid,
-        last_uid: u32,
-    ) -> Result<()> {
+    pub async fn update_sync_state(&self, id: Uuid, last_uid: u32) -> Result<()> {
         let id_str = id.to_string();
         let uid = last_uid as i64;
         let now = now_iso();

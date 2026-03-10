@@ -16,7 +16,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::{Error, Result};
 
 /// Общий секрет 32 байта — используется как ключ для ChaCha20-Poly1305.
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop, PartialEq)]
 pub struct SharedSecret([u8; 32]);
 
 impl SharedSecret {
@@ -56,7 +56,7 @@ pub fn derive_shared_secret(
     // HKDF-SHA256: извлекаем и расширяем ключевой материал
     use hkdf::Hkdf;
     let hk = Hkdf::<Sha256>::new(
-        Some(b"email-chat-v1"),  // salt
+        Some(b"email-chat-v1"), // salt
         dh_result.as_bytes(),   // ikm (input key material)
     );
 
@@ -88,19 +88,11 @@ mod tests {
         let alice = IdentityKeypair::generate();
         let bob = IdentityKeypair::generate();
 
-        let alice_shared = derive_shared_secret(
-            alice.secret_key(),
-            bob.public_key(),
-            "direct-chat",
-        )
-        .unwrap();
+        let alice_shared =
+            derive_shared_secret(alice.secret_key(), bob.public_key(), "direct-chat").unwrap();
 
-        let bob_shared = derive_shared_secret(
-            bob.secret_key(),
-            alice.public_key(),
-            "direct-chat",
-        )
-        .unwrap();
+        let bob_shared =
+            derive_shared_secret(bob.secret_key(), alice.public_key(), "direct-chat").unwrap();
 
         assert_eq!(alice_shared.as_bytes(), bob_shared.as_bytes());
     }

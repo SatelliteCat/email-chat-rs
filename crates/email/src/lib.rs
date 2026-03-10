@@ -31,8 +31,8 @@
 //! let config = ProviderConfig::mailru("user@mail.ru", "app_password");
 //! let client = EmailClient::connect(config).await?;
 //!
-//! // Получить новые сообщения
-//! let messages = client.fetch_new_messages().await?;
+//! // Получить новые сообщения (None = все новые, Some(uid) = начиная с UID)
+//! let messages = client.fetch_new_messages(None).await?;
 //!
 //! // Отправить сообщение
 //! client.send_message(todo!()).await?;
@@ -46,9 +46,7 @@ pub mod providers;
 pub mod smtp;
 pub mod types;
 
-pub use types::{
-    IncomingMessage, MessageUid, OutgoingMessage, RawEmailHeaders,
-};
+pub use types::{IncomingMessage, MessageUid, OutgoingMessage, RawEmailHeaders};
 
 /// Ошибки крейта email.
 #[derive(Debug, thiserror::Error)]
@@ -134,19 +132,13 @@ impl EmailClient {
     }
 
     /// Удаляет письма с сервера по UID.
-    pub async fn delete_messages(
-        &self,
-        folder: &str,
-        uids: &[MessageUid],
-    ) -> Result<()> {
+    pub async fn delete_messages(&self, folder: &str, uids: &[MessageUid]) -> Result<()> {
         self.imap.delete_messages(folder, uids).await
     }
 
     /// Убеждается что папка для echat сообщений существует, создаёт если нет.
     pub async fn ensure_echat_folder(&self) -> Result<()> {
-        self.imap
-            .ensure_folder(&self.config.echat_folder)
-            .await
+        self.imap.ensure_folder(&self.config.echat_folder).await
     }
 
     /// Возвращает конфигурацию провайдера.

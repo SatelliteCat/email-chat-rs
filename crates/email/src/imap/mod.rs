@@ -18,15 +18,15 @@
 use std::time::Duration;
 
 use async_imap::Session;
-use async_native_tls::TlsStream;
 use chrono::{DateTime, Utc};
 use tokio::net::TcpStream;
+use tokio_native_tls::TlsStream;
 use tracing::{debug, info, warn};
 
 use crate::{
+    Error, Result,
     providers::ProviderConfig,
     types::{IncomingMessage, MessageUid, RawEmailHeaders},
-    Error, Result,
 };
 
 /// Активное IMAP соединение.
@@ -89,14 +89,11 @@ impl ImapConnection {
 
         // Загружаем письма: заголовки + тело
         let messages_stream = session
-            .uid_fetch(
-                &fetch_set,
-                "(UID RFC822.HEADER RFC822.TEXT INTERNALDATE)",
-            )
+            .uid_fetch(&fetch_set, "(UID RFC822.HEADER RFC822.TEXT INTERNALDATE)")
             .await
             .map_err(|e| Error::Imap(e.to_string()))?;
 
-        use futures::TryStreamExt;
+        use futures_util::TryStreamExt;
         let raw_messages: Vec<_> = messages_stream
             .try_collect()
             .await
@@ -151,7 +148,9 @@ impl ImapConnection {
         }
 
         let mut guard = self.inner.lock().await;
-        let session = self.get_or_reconnect(&mut guard, &self.config.clone()).await?;
+        let session = self
+            .get_or_reconnect(&mut guard, &self.config.clone())
+            .await?;
 
         session
             .select(folder)
@@ -163,13 +162,13 @@ impl ImapConnection {
         let uid_set_str = uid_set.join(",");
 
         // Ставим флаг \Deleted
-        session
+        let _ = session
             .uid_store(&uid_set_str, "+FLAGS (\\Deleted)")
             .await
             .map_err(|e| Error::Imap(e.to_string()))?;
 
         // Физически удаляем
-        session
+        let _ = session
             .expunge()
             .await
             .map_err(|e| Error::Imap(e.to_string()))?;
@@ -181,7 +180,9 @@ impl ImapConnection {
     /// Создаёт папку если она не существует.
     pub async fn ensure_folder(&self, folder: &str) -> Result<()> {
         let mut guard = self.inner.lock().await;
-        let session = self.get_or_reconnect(&mut guard, &self.config.clone()).await?;
+        let session = self
+            .get_or_reconnect(&mut guard, &self.config.clone())
+            .await?;
 
         // Пробуем выбрать папку
         match session.select(folder).await {
@@ -233,7 +234,8 @@ async fn connect_and_login(config: &ProviderConfig) -> Result<ImapSession> {
         })?;
 
     // TLS обёртка
-    let tls = async_native_tls::TlsConnector::new();
+    let tls_connector = native_tls::TlsConnector::new().map_err(|e| Error::Tls(e.to_string()))?;
+    let tls = tokio_native_tls::TlsConnector::from(tls_connector);
     let tls_stream = tls
         .connect(host, tcp)
         .await
@@ -264,17 +266,16 @@ async fn connect_and_login(config: &ProviderConfig) -> Result<ImapSession> {
 
 /// Запускает IMAP IDLE и ждёт нотификации или таймаута.
 async fn run_idle(
-    mut session: ImapSession,
+    session: ImapSession,
     timeout: Duration,
 ) -> std::result::Result<(ImapSession, bool), Error> {
     let mut idle = session.idle();
 
-    idle.init()
-        .await
-        .map_err(|e| Error::Imap(e.to_string()))?;
+    idle.init().await.map_err(|e| Error::Imap(e.to_string()))?;
 
     // Ждём с таймаутом
-    let result = tokio::time::timeout(timeout, idle.wait()).await;
+    let (wait_future, _stop_source) = idle.wait();
+    let result = tokio::time::timeout(timeout, wait_future).await;
 
     let got_new = match result {
         Ok(Ok(reason)) => {
@@ -292,10 +293,7 @@ async fn run_idle(
     };
 
     // Восстанавливаем сессию из IDLE
-    let session = idle
-        .done()
-        .await
-        .map_err(|e| Error::Imap(e.to_string()))?;
+    let session = idle.done().await.map_err(|e| Error::Imap(e.to_string()))?;
 
     Ok((session, got_new))
 }
@@ -303,34 +301,25 @@ async fn run_idle(
 // ── Парсинг ───────────────────────────────────────────────────────────────────
 
 /// Разбирает сырое IMAP сообщение в IncomingMessage.
-fn parse_imap_message(
-    msg: &async_imap::types::Fetch,
-    folder: &str,
-) -> Result<IncomingMessage> {
+fn parse_imap_message(msg: &async_imap::types::Fetch, folder: &str) -> Result<IncomingMessage> {
     let uid = MessageUid(msg.uid.ok_or_else(|| Error::Parse("нет UID".into()))?);
 
     // Заголовки
     let header_bytes = msg
         .header()
         .ok_or_else(|| Error::Parse("нет заголовков".into()))?;
-    let header_str = std::str::from_utf8(header_bytes)
-        .map_err(|e| Error::Parse(e.to_string()))?;
+    let header_str = std::str::from_utf8(header_bytes).map_err(|e| Error::Parse(e.to_string()))?;
 
     let (headers, from, to, subject) = parse_headers(header_str)?;
 
     // Тело письма
     let body_bytes = msg.text().unwrap_or(b"");
-    let body = std::str::from_utf8(body_bytes)
-        .unwrap_or("")
-        .to_string();
+    let body = std::str::from_utf8(body_bytes).unwrap_or("").to_string();
 
     // Дата
     let date = msg
         .internal_date()
-        .map(|d| {
-            DateTime::from_timestamp(d.timestamp(), 0)
-                .unwrap_or_else(Utc::now)
-        })
+        .map(|d| DateTime::from_timestamp(d.timestamp(), 0).unwrap_or_else(Utc::now))
         .unwrap_or_else(Utc::now);
 
     Ok(IncomingMessage {
@@ -346,9 +335,7 @@ fn parse_imap_message(
 }
 
 /// Разбирает строку заголовков RFC 2822.
-fn parse_headers(
-    raw: &str,
-) -> Result<(RawEmailHeaders, String, Vec<String>, String)> {
+fn parse_headers(raw: &str) -> Result<(RawEmailHeaders, String, Vec<String>, String)> {
     let mut headers = RawEmailHeaders::default();
     let mut from = String::new();
     let mut to = Vec::new();
@@ -365,11 +352,7 @@ fn parse_headers(
             match name.to_lowercase().as_str() {
                 "from" => from = extract_email_address(&value),
                 "to" | "cc" => {
-                    to.extend(
-                        value
-                            .split(',')
-                            .map(|s| extract_email_address(s.trim())),
-                    );
+                    to.extend(value.split(',').map(|s| extract_email_address(s.trim())));
                 }
                 "subject" => subject = decode_mime_header(&value),
                 _ => {}

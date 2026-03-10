@@ -7,8 +7,8 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
-    models::{ContactRow, ContactStatus, NewContact, UpdateContact, now_iso},
     Error, Result,
+    models::{ContactRow, ContactStatus, NewContact, UpdateContact, now_iso},
 };
 
 #[derive(Clone)]
@@ -60,22 +60,22 @@ impl ContactRepo {
     /// Возвращает контакт по ID.
     pub async fn get_by_id(&self, id: Uuid) -> Result<ContactRow> {
         let id_str = id.to_string();
-        sqlx::query_as!(ContactRow, "SELECT * FROM contacts WHERE id = ?", id_str)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| Error::NotFound(format!("Контакт {}", id)))
+        sqlx::query_as!(
+            ContactRow,
+            r#"SELECT id AS "id!", account_id AS "account_id!", name AS "name!", email AS "email!", avatar, status AS "status!", public_keys_json, handshake_at, created_at AS "created_at!", updated_at AS "updated_at!" FROM contacts WHERE id = ?"#,
+            id_str,
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("Контакт {}", id)))
     }
 
     /// Возвращает контакт по email в рамках аккаунта.
-    pub async fn get_by_email(
-        &self,
-        account_id: Uuid,
-        email: &str,
-    ) -> Result<ContactRow> {
+    pub async fn get_by_email(&self, account_id: Uuid, email: &str) -> Result<ContactRow> {
         let account_id_str = account_id.to_string();
         sqlx::query_as!(
             ContactRow,
-            "SELECT * FROM contacts WHERE account_id = ? AND email = ?",
+            r#"SELECT id AS "id!", account_id AS "account_id!", name AS "name!", email AS "email!", avatar, status AS "status!", public_keys_json, handshake_at, created_at AS "created_at!", updated_at AS "updated_at!" FROM contacts WHERE account_id = ? AND email = ?"#,
             account_id_str,
             email,
         )
@@ -89,7 +89,7 @@ impl ContactRepo {
         let account_id_str = account_id.to_string();
         Ok(sqlx::query_as!(
             ContactRow,
-            "SELECT * FROM contacts WHERE account_id = ? ORDER BY name COLLATE NOCASE",
+            r#"SELECT id AS "id!", account_id AS "account_id!", name AS "name!", email AS "email!", avatar, status AS "status!", public_keys_json, handshake_at, created_at AS "created_at!", updated_at AS "updated_at!" FROM contacts WHERE account_id = ? ORDER BY name COLLATE NOCASE"#,
             account_id_str,
         )
         .fetch_all(&self.pool)
@@ -101,9 +101,7 @@ impl ContactRepo {
         let account_id_str = account_id.to_string();
         Ok(sqlx::query_as!(
             ContactRow,
-            r#"SELECT * FROM contacts
-               WHERE account_id = ? AND status = 'active'
-               ORDER BY name COLLATE NOCASE"#,
+            r#"SELECT id AS "id!", account_id AS "account_id!", name AS "name!", email AS "email!", avatar, status AS "status!", public_keys_json, handshake_at, created_at AS "created_at!", updated_at AS "updated_at!" FROM contacts WHERE account_id = ? AND status = 'active' ORDER BY name COLLATE NOCASE"#,
             account_id_str,
         )
         .fetch_all(&self.pool)
@@ -151,11 +149,7 @@ impl ContactRepo {
     }
 
     /// Обновляет публичные ключи и статус после завершения handshake.
-    pub async fn complete_handshake(
-        &self,
-        id: Uuid,
-        public_keys_json: &str,
-    ) -> Result<()> {
+    pub async fn complete_handshake(&self, id: Uuid, public_keys_json: &str) -> Result<()> {
         let id_str = id.to_string();
         let now = now_iso();
 
