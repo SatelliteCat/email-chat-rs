@@ -5,8 +5,8 @@ members = [
     "crates/encryption",
     "crates/email",
     "crates/storage",
+    "crates/core",
     # Будут добавлены по мере разработки:
-    # "crates/core",
     # "crates/platform",
     # "apps/desktop",
     # "apps/mobile",

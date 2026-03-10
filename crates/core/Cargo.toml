@@ -1,0 +1,31 @@
+[package]
+name        = "core"
+description = "Business logic for email-chat: services, sync engine, domain models"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+# repository.workspace = true
+
+[dependencies]
+# Внутренние
+encryption = { path = "../encryption" }
+
+# Async
+tokio        = { workspace = true }
+async-trait  = "0.1"
+
+# Сериализация
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# Утилиты
+thiserror = { workspace = true }
+chrono    = { workspace = true }
+uuid      = { workspace = true }
+tracing   = { workspace = true }
+base64    = { workspace = true }
+hex       = { workspace = true }
+
+[dev-dependencies]
+tokio-test         = { workspace = true }
+tracing-subscriber = { workspace = true }
