@@ -2,14 +2,9 @@
 
 use egui::{Color32, FontId, Frame, Margin, RichText, Rounding, Ui, Vec2};
 
-use core::models::contact::{Contact, ContactStatus};
+use echat_core::models::contact::{Contact, ContactStatus};
 
-use crate::{
-    runtime::AppEvent,
-    runtime::EventSender,
-    state::UiState,
-    views::theme,
-};
+use crate::{runtime::AppEvent, runtime::EventSender, state::UiState, views::theme};
 
 /// Рисует экран контактов.
 pub fn show(ui: &mut Ui, state: &mut UiState, sender: &EventSender) {
@@ -62,10 +57,8 @@ pub fn show(ui: &mut Ui, state: &mut UiState, sender: &EventSender) {
                         if ui
                             .add_enabled(
                                 can_add,
-                                egui::Button::new(
-                                    RichText::new("Добавить").color(Color32::WHITE),
-                                )
-                                .fill(theme::ACCENT),
+                                egui::Button::new(RichText::new("Добавить").color(Color32::WHITE))
+                                    .fill(theme::ACCENT),
                             )
                             .clicked()
                         {
@@ -111,10 +104,7 @@ pub fn show(ui: &mut Ui, state: &mut UiState, sender: &EventSender) {
                 if contacts.is_empty() {
                     ui.add_space(24.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(
-                            RichText::new("Нет контактов")
-                                .color(theme::TEXT_TIMESTAMP),
-                        );
+                        ui.label(RichText::new("Нет контактов").color(theme::TEXT_TIMESTAMP));
                     });
                 }
 
@@ -135,8 +125,14 @@ fn contact_row(ui: &mut Ui, contact: &Contact, sender: &EventSender) {
             ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 // Аватар
-                let letter = contact.name.chars().next().unwrap_or('?')
-                    .to_uppercase().next().unwrap_or('?');
+                let letter = contact
+                    .name
+                    .chars()
+                    .next()
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .next()
+                    .unwrap_or('?');
                 super::sidebar::avatar_circle(ui, letter, 36.0, theme::ACCENT);
                 ui.add_space(10.0);
 
@@ -186,6 +182,23 @@ fn contact_row(ui: &mut Ui, contact: &Contact, sender: &EventSender) {
                                 contact_id: contact.id,
                             });
                         }
+                    }
+
+                    ui.add_space(8.0);
+
+                    // Кнопка «Удалить»
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("🗑").font(FontId::proportional(14.0)))
+                                .frame(false)
+                                .fill(egui::Color32::from_rgb(60, 20, 20)),
+                        )
+                        .on_hover_text("Удалить контакт")
+                        .clicked()
+                    {
+                        sender.send(AppEvent::DeleteContact {
+                            contact_id: contact.id,
+                        });
                     }
                 });
             });

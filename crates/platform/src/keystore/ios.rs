@@ -26,8 +26,8 @@
 //! ```
 
 use async_trait::async_trait;
-use core::ports::keystore::KeystorePort;
-use core::Result;
+use echat_core::Result;
+use echat_core::ports::keystore::KeystorePort;
 
 /// iOS Keychain реализация (stub — требует objc/Swift bridge при сборке под iOS).
 pub struct IosKeystore;

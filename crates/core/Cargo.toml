@@ -1,5 +1,5 @@
 [package]
-name        = "core"
+name        = "echat_core"
 description = "Business logic for email-chat: services, sync engine, domain models"
 version.workspace    = true
 edition.workspace    = true

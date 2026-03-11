@@ -209,7 +209,7 @@ impl ChatService {
         &self,
         account_id: Uuid,
         from_email: String,
-        conv_id: Uuid,
+        _conv_id: Uuid,
         msg_id: Uuid,
         body: String,
         sent_at: chrono::DateTime<Utc>,
@@ -320,7 +320,7 @@ impl ChatService {
         reply_to: Option<Uuid>,
         sent_at: &chrono::DateTime<Utc>,
     ) -> Result<String> {
-        let keypair = self.account_svc.load_keypair(account_id).await?;
+        let keypair = self.account_svc.load_or_create_keypair(account_id).await?;
 
         let their_x25519 = their_keys
             .x25519_bytes()

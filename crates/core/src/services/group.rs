@@ -3,6 +3,7 @@
 use uuid::Uuid;
 
 use crate::{
+    Error, Result,
     events::{ChatEvent, EventBus},
     models::conversation::GroupRole,
     ports::{
@@ -10,7 +11,6 @@ use crate::{
         storage::DynStorage,
     },
     services::account::AccountService,
-    Error, Result,
 };
 
 pub struct GroupService {
@@ -27,7 +27,12 @@ impl GroupService {
         account_svc: AccountService,
         events: EventBus,
     ) -> Self {
-        Self { storage, email, account_svc, events }
+        Self {
+            storage,
+            email,
+            account_svc,
+            events,
+        }
     }
 
     /// Создаёт новый групповой чат.
@@ -94,7 +99,8 @@ impl GroupService {
     ) -> Result<()> {
         // Проверяем права если указан инициатор
         if let Some(req_id) = requester_contact_id {
-            self.check_member_permission(conv_id, req_id, "добавлять участников").await?;
+            self.check_member_permission(conv_id, req_id, "добавлять участников")
+                .await?;
         }
 
         let contact = self.storage.get_contact(new_contact_id).await?;
@@ -120,7 +126,9 @@ impl GroupService {
             account_id,
             conv_id,
             &all_members,
-            GroupEventKind::MemberAdded { contact_id: new_contact_id },
+            GroupEventKind::MemberAdded {
+                contact_id: new_contact_id,
+            },
         )
         .await?;
 
@@ -141,10 +149,13 @@ impl GroupService {
         requester_contact_id: Option<Uuid>,
     ) -> Result<()> {
         if let Some(req_id) = requester_contact_id {
-            self.check_member_permission(conv_id, req_id, "удалять участников").await?;
+            self.check_member_permission(conv_id, req_id, "удалять участников")
+                .await?;
         }
 
-        self.storage.remove_group_member(conv_id, contact_id).await?;
+        self.storage
+            .remove_group_member(conv_id, contact_id)
+            .await?;
 
         // Уведомляем оставшихся участников
         let remaining = self.get_member_ids(conv_id).await?;
@@ -172,7 +183,7 @@ impl GroupService {
         body: String,
     ) -> Result<()> {
         let account = self.storage.get_account(account_id).await?;
-        let keypair = self.account_svc.load_keypair(account_id).await?;
+        let keypair = self.account_svc.load_or_create_keypair(account_id).await?;
         let members_db = self.storage.get_group_members(conv_id).await?;
 
         // Собираем GroupMember для fan-out шифрования
@@ -209,8 +220,8 @@ impl GroupService {
             "body": body,
             "protocol_version": 1,
         });
-        let envelope_bytes = serde_json::to_vec(&envelope)
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        let envelope_bytes =
+            serde_json::to_vec(&envelope).map_err(|e| Error::Internal(e.to_string()))?;
 
         let payload = encryption::group::encrypt(
             &envelope_bytes,
@@ -220,7 +231,8 @@ impl GroupService {
         )
         .map_err(|e| Error::Encryption(e.to_string()))?;
 
-        let payload_b64 = payload.to_base64()
+        let payload_b64 = payload
+            .to_base64()
             .map_err(|e| Error::Encryption(e.to_string()))?;
 
         // Отправляем одно письмо на всех (To: + CC:)
@@ -272,7 +284,7 @@ impl GroupService {
 
     async fn broadcast_group_event(
         &self,
-        account_id: Uuid,
+        _account_id: Uuid,
         conv_id: Uuid,
         member_ids: &[Uuid],
         _kind: GroupEventKind,
@@ -290,6 +302,7 @@ impl GroupService {
 
 use chrono::Utc;
 
+#[allow(dead_code)]
 enum GroupEventKind {
     Created { name: String },
     MemberAdded { contact_id: Uuid },

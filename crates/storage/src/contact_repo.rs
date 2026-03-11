@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     Error, Result,
-    models::{ContactRow, ContactStatus, NewContact, UpdateContact, now_iso},
+    models::{ContactRow, NewContact, UpdateContact, now_iso},
 };
 
 #[derive(Clone)]
@@ -115,7 +115,6 @@ impl ContactRepo {
 
         // Строим запрос динамически — обновляем только переданные поля
         // sqlx не поддерживает динамические UPDATE удобно, поэтому вручную
-        let mut sets: Vec<String> = vec!["updated_at = ?".to_string()];
         // Позиционные параметры собираем отдельно
         // и передаём через query_builder
 

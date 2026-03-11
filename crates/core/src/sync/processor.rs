@@ -15,9 +15,9 @@
 use uuid::Uuid;
 
 use crate::{
+    Error, Result,
     ports::email::IncomingEmail,
     services::{account::AccountService, chat::ChatService, contacts::ContactService},
-    Error, Result,
 };
 
 /// Тип входящего echat-письма после первичного разбора.
@@ -40,7 +40,11 @@ pub async fn process_incoming(
     chat_svc: &ChatService,
 ) -> Result<()> {
     // Шаг 1: проверяем заголовок X-EChat
-    let headers: Vec<(&str, &str)> = email.headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let headers: Vec<(&str, &str)> = email
+        .headers
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
     if !encryption::disguise::is_echat_message(&headers, Some(&email.body)) {
         return Ok(()); // обычное письмо — пропускаем
     }
@@ -101,8 +105,6 @@ pub async fn process_incoming(
 
 /// Определяет тип входящего payload.
 fn detect_kind(raw: &str) -> IncomingKind {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-
     // Пробуем как HandshakeMessage
     if let Ok(hs) = encryption::handshake::HandshakeMessage::from_base64(raw) {
         if hs.verify(3600).is_ok() {
@@ -129,12 +131,14 @@ fn detect_kind(raw: &str) -> IncomingKind {
 
 /// Расшифровывает зашифрованное сообщение.
 async fn decrypt_message(
-    account_id: Uuid,
-    from_email: &str,
-    payload_b64: &str,
-    account_svc: &AccountService,
+    _account_id: Uuid,
+    _from_email: &str,
+    _payload_b64: &str,
+    _account_svc: &AccountService,
 ) -> Result<(Uuid, Uuid, String, chrono::DateTime<chrono::Utc>)> {
     // TODO: нужен доступ к StoragePort для получения публичного ключа контакта
     // Пока оставляем как заглушку — будет реализовано при интеграции
-    Err(Error::Internal("decrypt_message: требует StoragePort (TODO)".into()))
+    Err(Error::Internal(
+        "decrypt_message: требует StoragePort (TODO)".into(),
+    ))
 }

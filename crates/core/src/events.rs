@@ -12,7 +12,6 @@
 //!               └─► UI (mobile push notification)
 //! ```
 
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::models::{
@@ -36,10 +35,7 @@ pub enum ChatEvent {
     },
 
     /// Контакт завершил handshake — канал установлен
-    ContactActivated {
-        contact_id: Uuid,
-        email: String,
-    },
+    ContactActivated { contact_id: Uuid, email: String },
 
     /// Статус контакта изменился
     ContactStatusChanged {

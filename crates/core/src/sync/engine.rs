@@ -14,9 +14,7 @@
 //! }
 //! ```
 
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::{
@@ -46,7 +44,10 @@ pub fn start(
     contact_svc: ContactService,
     chat_svc: ChatService,
     events: EventBus,
-) -> (tokio::sync::mpsc::Sender<SyncCommand>, tokio::task::JoinHandle<()>) {
+) -> (
+    tokio::sync::mpsc::Sender<SyncCommand>,
+    tokio::task::JoinHandle<()>,
+) {
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(32);
 
     let handle = tokio::spawn(async move {
@@ -106,7 +107,6 @@ async fn run_sync_loop(
             account_id,
             since_uid,
             &email,
-            &storage,
             &account_svc,
             &contact_svc,
             &chat_svc,
@@ -122,7 +122,9 @@ async fn run_sync_loop(
             }
             Err(e) => {
                 tracing::warn!("Ошибка при получении писем: {}", e);
-                events.emit(ChatEvent::SyncError { message: e.to_string() });
+                events.emit(ChatEvent::SyncError {
+                    message: e.to_string(),
+                });
                 events.emit(ChatEvent::SyncStateChanged { connected: false });
                 tokio::time::sleep(reconnect_delay).await;
                 reconnect_delay = (reconnect_delay * 2).min(MAX_RECONNECT_DELAY);
@@ -173,7 +175,6 @@ async fn fetch_and_process(
     account_id: Uuid,
     since_uid: Option<u32>,
     email: &DynEmailTransport,
-    storage: &DynStorage,
     account_svc: &AccountService,
     contact_svc: &ContactService,
     chat_svc: &ChatService,
@@ -191,14 +192,9 @@ async fn fetch_and_process(
     for msg in messages {
         let uid = msg.uid;
 
-        if let Err(e) = super::processor::process_incoming(
-            &msg,
-            account_id,
-            account_svc,
-            contact_svc,
-            chat_svc,
-        )
-        .await
+        if let Err(e) =
+            super::processor::process_incoming(&msg, account_id, account_svc, contact_svc, chat_svc)
+                .await
         {
             tracing::warn!("Ошибка обработки письма uid={}: {}", uid, e);
             // Не прерываем — продолжаем остальные

@@ -81,4 +81,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Тесты
 hex         = { version = "0.4" }
 tokio-test  = { version = "0.4" }
-async-trait = "0.1"
+async-trait = "0.1.84"

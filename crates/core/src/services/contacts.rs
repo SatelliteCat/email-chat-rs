@@ -3,14 +3,14 @@
 use uuid::Uuid;
 
 use crate::{
+    Error, Result,
     events::{ChatEvent, EventBus},
-    models::contact::{Contact, ContactStatus},
+    models::contact::Contact,
     ports::{
         email::{DynEmailTransport, OutgoingEmail},
         storage::{CreateContact, DynStorage, UpdateContact},
     },
     services::account::AccountService,
-    Error, Result,
 };
 
 pub struct ContactService {
@@ -27,7 +27,12 @@ impl ContactService {
         account_svc: AccountService,
         events: EventBus,
     ) -> Self {
-        Self { storage, email, account_svc, events }
+        Self {
+            storage,
+            email,
+            account_svc,
+            events,
+        }
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
@@ -95,16 +100,12 @@ impl ContactService {
     ///
     /// - Если контакт имеет приложение → отправляет HandshakeInit-письмо
     /// - Если нет → отправляет invite с зашифрованным payload в теле
-    pub async fn initiate_handshake(
-        &self,
-        account_id: Uuid,
-        contact_id: Uuid,
-    ) -> Result<()> {
+    pub async fn initiate_handshake(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
         let account = self.storage.get_account(account_id).await?;
         let contact = self.storage.get_contact(contact_id).await?;
 
-        // Загружаем keypair
-        let keypair = self.account_svc.load_keypair(account_id).await?;
+        // Загружаем keypair (или генерируем если отсутствует)
+        let keypair = self.account_svc.load_or_create_keypair(account_id).await?;
 
         // Формируем handshake payload
         let handshake_msg =
@@ -124,14 +125,13 @@ impl ContactService {
         match self.email.send(outgoing).await {
             Ok(()) => {
                 self.storage.set_contact_pending(contact_id).await?;
-                tracing::info!(
-                    "Handshake отправлен: {} → {}",
-                    account.email,
-                    contact.email
-                );
+                tracing::info!("Handshake отправлен: {} → {}", account.email, contact.email);
             }
             Err(e) => {
-                tracing::warn!("Не удалось отправить handshake: {}. Статус остаётся unregistered.", e);
+                tracing::warn!(
+                    "Не удалось отправить handshake: {}. Статус остаётся unregistered.",
+                    e
+                );
                 // Не возвращаем ошибку — статус останется unregistered,
                 // SyncEngine повторит при следующей синхронизации
             }
@@ -155,8 +155,8 @@ impl ContactService {
             .await?;
 
         // Сохраняем публичные ключи как JSON
-        let keys_json = serde_json::to_string(their_public_keys)
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        let keys_json =
+            serde_json::to_string(their_public_keys).map_err(|e| Error::Internal(e.to_string()))?;
 
         self.storage
             .complete_contact_handshake(contact.id, keys_json)
@@ -183,7 +183,11 @@ impl ContactService {
         let account = self.storage.get_account(account_id).await?;
 
         // Ищем контакт или создаём автоматически
-        let contact = match self.storage.get_contact_by_email(account_id, from_email).await {
+        let contact = match self
+            .storage
+            .get_contact_by_email(account_id, from_email)
+            .await
+        {
             Ok(c) => c,
             Err(_) => {
                 // Автоматически добавляем нового контакта
@@ -202,14 +206,14 @@ impl ContactService {
         };
 
         // Сохраняем публичные ключи
-        let keys_json = serde_json::to_string(their_public_keys)
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        let keys_json =
+            serde_json::to_string(their_public_keys).map_err(|e| Error::Internal(e.to_string()))?;
         self.storage
             .complete_contact_handshake(contact.id, keys_json)
             .await?;
 
         // Отправляем Ack
-        let keypair = self.account_svc.load_keypair(account_id).await?;
+        let keypair = self.account_svc.load_or_create_keypair(account_id).await?;
         let ack_msg = encryption::handshake::HandshakeMessage::new_ack(&keypair, &account.email);
         let ack_b64 = ack_msg.to_base64()?;
 

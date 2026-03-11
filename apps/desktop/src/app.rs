@@ -10,10 +10,10 @@ use std::sync::Arc;
 use egui::{CentralPanel, Context, Frame, SidePanel, TopBottomPanel};
 use uuid::Uuid;
 
-use core::{AppConfig, AppState};
+use echat_core::{AppConfig, AppState};
 
 use crate::{
-    runtime::{subscribe_to_core_events, AppEvent, AsyncRuntime, EventSender},
+    runtime::{AppEvent, AsyncRuntime, EventSender, subscribe_to_core_events},
     state::{ConversationItem, Screen, UiState},
     views::{chat, compose, contacts, login, sidebar, theme},
 };
@@ -49,8 +49,8 @@ impl eframe::App for EchatApp {
         self.ui.expire_toasts();
 
         match self.ui.screen.clone() {
-            Screen::Login    => self.draw_login(ctx),
-            Screen::Main     => self.draw_main(ctx),
+            Screen::Login => self.draw_login(ctx),
+            Screen::Main => self.draw_main(ctx),
             Screen::Contacts => self.draw_contacts(ctx),
             Screen::NewGroup => { /* TODO */ }
         }
@@ -102,15 +102,16 @@ impl EchatApp {
                     .iter()
                     .map(|c| {
                         let name = match &c.kind {
-                            core::models::conversation::ConversationKind::Direct {
+                            echat_core::models::conversation::ConversationKind::Direct {
                                 contact_id,
                             } => contacts
                                 .iter()
                                 .find(|ct| &ct.id == contact_id)
                                 .map(|ct| ct.name.clone())
                                 .unwrap_or_else(|| "Неизвестный".to_string()),
-                            core::models::conversation::ConversationKind::Group {
-                                name, ..
+                            echat_core::models::conversation::ConversationKind::Group {
+                                name,
+                                ..
                             } => name.clone(),
                         };
                         ConversationItem::from_conversation(c, &name)
@@ -150,7 +151,8 @@ impl EchatApp {
             }
 
             AppEvent::ContactAdded => {
-                self.ui.toast_info("Контакт добавлен, отправляем handshake…");
+                self.ui
+                    .toast_info("Контакт добавлен, отправляем handshake…");
                 self.load_contacts();
             }
 
@@ -160,6 +162,15 @@ impl EchatApp {
 
             AppEvent::OpenChatWith { contact_id } => {
                 self.open_chat_with(contact_id);
+            }
+
+            AppEvent::DeleteContact { contact_id } => {
+                self.spawn_delete_contact(contact_id);
+            }
+
+            AppEvent::ContactDeleted { contact_id } => {
+                self.ui.contacts.retain(|c| c.id != contact_id);
+                self.ui.toast_info("Контакт удалён");
             }
 
             // ── Синхронизация ─────────────────────────────────────────────
@@ -232,8 +243,7 @@ impl EchatApp {
                         .exact_height(58.0)
                         .frame(Frame::none())
                         .show_inside(ui, |ui| {
-                            let action =
-                                compose::show(ui, &mut self.ui.chat.draft, false);
+                            let action = compose::show(ui, &mut self.ui.chat.draft, false);
                             if let compose::ComposeAction::Send(text) = action {
                                 self.spawn_send_message(conv.id, text);
                             }
@@ -265,9 +275,7 @@ impl EchatApp {
     fn draw_toasts(&self, ctx: &Context) {
         for (i, toast) in self.ui.toasts.iter().enumerate() {
             let (bg, fg) = match toast.kind {
-                crate::state::ToastKind::Info => {
-                    (theme::BG_MSG_IN, theme::TEXT_PRIMARY)
-                }
+                crate::state::ToastKind::Info => (theme::BG_MSG_IN, theme::TEXT_PRIMARY),
                 crate::state::ToastKind::Error => {
                     (egui::Color32::from_rgb(60, 20, 20), theme::ERROR)
                 }
@@ -304,17 +312,16 @@ impl EchatApp {
 
         self.rt.spawn(async move {
             // Собираем AppState через platform
-            let state =
-                match platform::build_app_state(&email, &password, &db_path, config).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        sender.send(AppEvent::AccountError(format!(
-                            "Не удалось подключиться: {}",
-                            e
-                        )));
-                        return;
-                    }
-                };
+            let state = match platform::build_app_state(&email, &password, &db_path, config).await {
+                Ok(s) => s,
+                Err(e) => {
+                    sender.send(AppEvent::AccountError(format!(
+                        "Не удалось подключиться: {}",
+                        e
+                    )));
+                    return;
+                }
+            };
 
             // Определяем провайдера по домену
             let provider = match provider_from_email(&email) {
@@ -334,10 +341,23 @@ impl EchatApp {
                 .await
             {
                 Ok(acc) => acc,
-                // Уже существует — загружаем
-                Err(core::Error::AlreadyExists(_)) => {
+                // Уже существует — загружаем и убеждаемся что keypair есть
+                Err(echat_core::Error::AlreadyExists(_)) => {
                     match state.account_service.list_accounts().await {
-                        Ok(mut list) if !list.is_empty() => list.remove(0),
+                        Ok(mut list) if !list.is_empty() => {
+                            let acc = list.remove(0);
+                            // Генерируем keypair если отсутствует
+                            if let Err(e) =
+                                state.account_service.load_or_create_keypair(acc.id).await
+                            {
+                                sender.send(AppEvent::AccountError(format!(
+                                    "Не удалось создать identity ключ: {}",
+                                    e
+                                )));
+                                return;
+                            }
+                            acc
+                        }
                         _ => {
                             sender.send(AppEvent::AccountError(
                                 "Не удалось загрузить аккаунт".into(),
@@ -411,7 +431,10 @@ impl EchatApp {
 
         self.rt.spawn(async move {
             match state.chat_service.get_history(conv_id, None, 60).await {
-                Ok(msgs) => sender.send(AppEvent::HistoryLoaded { conv_id, messages: msgs }),
+                Ok(msgs) => sender.send(AppEvent::HistoryLoaded {
+                    conv_id,
+                    messages: msgs,
+                }),
                 Err(e) => tracing::warn!("Ошибка загрузки истории: {}", e),
             }
         });
@@ -437,7 +460,10 @@ impl EchatApp {
                 .send_message(account_id, contact_id, text, None)
                 .await
             {
-                Ok(msg) => sender.send(AppEvent::MessageSent { conv_id, message: msg }),
+                Ok(msg) => sender.send(AppEvent::MessageSent {
+                    conv_id,
+                    message: msg,
+                }),
                 Err(e) => sender.send(AppEvent::SendError(e.to_string())),
             }
         });
@@ -462,18 +488,38 @@ impl EchatApp {
         });
     }
 
+    fn spawn_delete_contact(&mut self, contact_id: Uuid) {
+        let (state, _) = match self.services() {
+            Some(x) => x,
+            None => return,
+        };
+        let sender = self.rt.event_sender();
+
+        self.rt.spawn(async move {
+            match state.contact_service.delete_contact(contact_id).await {
+                Ok(_) => sender.send(AppEvent::ContactDeleted { contact_id }),
+                Err(e) => sender.send(AppEvent::ContactError(e.to_string())),
+            }
+        });
+    }
+
     fn open_chat_with(&mut self, contact_id: Uuid) {
         // Ищем уже существующую direct-беседу
-        let existing = self.ui.contacts.iter().find(|c| c.id == contact_id).map(|c| {
-            self.ui
-                .conversations
-                .iter()
-                .find(|conv| {
-                    // Используем display_name как прокси (до полного Conversation хранения)
-                    conv.display_name == c.name || conv.display_name == c.email
-                })
-                .map(|c| c.id)
-        });
+        let existing = self
+            .ui
+            .contacts
+            .iter()
+            .find(|c| c.id == contact_id)
+            .map(|c| {
+                self.ui
+                    .conversations
+                    .iter()
+                    .find(|conv| {
+                        // Используем display_name как прокси (до полного Conversation хранения)
+                        conv.display_name == c.name || conv.display_name == c.email
+                    })
+                    .map(|c| c.id)
+            });
 
         if let Some(Some(conv_id)) = existing {
             self.select_conversation(conv_id);
@@ -530,14 +576,12 @@ fn app_db_path() -> String {
     dir.join("db.sqlite").to_string_lossy().into_owned()
 }
 
-fn provider_from_email(email: &str) -> Option<core::models::account::Provider> {
-    use core::models::account::Provider;
+fn provider_from_email(email: &str) -> Option<echat_core::models::account::Provider> {
+    use echat_core::models::account::Provider;
     let domain = email.split('@').nth(1)?;
     match domain {
         "mail.ru" | "inbox.ru" | "list.ru" | "bk.ru" => Some(Provider::MailRu),
-        "yandex.ru" | "ya.ru" | "yandex.com" | "yandex.kz" | "yandex.by" => {
-            Some(Provider::Yandex)
-        }
+        "yandex.ru" | "ya.ru" | "yandex.com" | "yandex.kz" | "yandex.by" => Some(Provider::Yandex),
         _ => None,
     }
 }

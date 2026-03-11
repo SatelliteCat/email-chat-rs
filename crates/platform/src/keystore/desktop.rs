@@ -10,8 +10,8 @@
 //! Итоговый ключ: service = "echat.{service}", username = "{key}"
 
 use async_trait::async_trait;
-use core::ports::keystore::KeystorePort;
-use core::Result;
+use echat_core::Result;
+use echat_core::ports::keystore::KeystorePort;
 
 /// Реализация KeystorePort для desktop через OS keychain.
 pub struct DesktopKeystore;
@@ -25,7 +25,7 @@ impl DesktopKeystore {
 #[async_trait]
 impl KeystorePort for DesktopKeystore {
     async fn set(&self, service: &str, key: &str, secret: &[u8]) -> Result<()> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
+        use base64::{Engine, engine::general_purpose::STANDARD};
 
         let full_service = format!("echat.{}", service);
         let encoded = STANDARD.encode(secret);
@@ -35,41 +35,41 @@ impl KeystorePort for DesktopKeystore {
         let k = key.to_string();
         tokio::task::spawn_blocking(move || {
             let entry = keyring::Entry::new(&svc, &k)
-                .map_err(|e| core::Error::Keystore(e.to_string()))?;
+                .map_err(|e| echat_core::Error::Keystore(e.to_string()))?;
             entry
                 .set_password(&encoded)
-                .map_err(|e| core::Error::Keystore(e.to_string()))
+                .map_err(|e| echat_core::Error::Keystore(e.to_string()))
         })
         .await
-        .map_err(|e| core::Error::Keystore(e.to_string()))??;
+        .map_err(|e| echat_core::Error::Keystore(e.to_string()))??;
 
         Ok(())
     }
 
     async fn get(&self, service: &str, key: &str) -> Result<Option<Vec<u8>>> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
+        use base64::{Engine, engine::general_purpose::STANDARD};
 
         let full_service = format!("echat.{}", service);
         let k = key.to_string();
 
         let result = tokio::task::spawn_blocking(move || {
             let entry = keyring::Entry::new(&full_service, &k)
-                .map_err(|e| core::Error::Keystore(e.to_string()))?;
+                .map_err(|e| echat_core::Error::Keystore(e.to_string()))?;
             match entry.get_password() {
                 Ok(encoded) => Ok(Some(encoded)),
                 Err(keyring::Error::NoEntry) => Ok(None),
-                Err(e) => Err(core::Error::Keystore(e.to_string())),
+                Err(e) => Err(echat_core::Error::Keystore(e.to_string())),
             }
         })
         .await
-        .map_err(|e| core::Error::Keystore(e.to_string()))??;
+        .map_err(|e| echat_core::Error::Keystore(e.to_string()))??;
 
         match result {
             None => Ok(None),
             Some(encoded) => {
                 let bytes = STANDARD
                     .decode(&encoded)
-                    .map_err(|e| core::Error::Keystore(format!("base64 decode: {}", e)))?;
+                    .map_err(|e| echat_core::Error::Keystore(format!("base64 decode: {}", e)))?;
                 Ok(Some(bytes))
             }
         }
@@ -81,15 +81,15 @@ impl KeystorePort for DesktopKeystore {
 
         tokio::task::spawn_blocking(move || {
             let entry = keyring::Entry::new(&full_service, &k)
-                .map_err(|e| core::Error::Keystore(e.to_string()))?;
+                .map_err(|e| echat_core::Error::Keystore(e.to_string()))?;
             match entry.delete_credential() {
                 Ok(()) => Ok(()),
                 // Если записи нет — не ошибка
                 Err(keyring::Error::NoEntry) => Ok(()),
-                Err(e) => Err(core::Error::Keystore(e.to_string())),
+                Err(e) => Err(echat_core::Error::Keystore(e.to_string())),
             }
         })
         .await
-        .map_err(|e| core::Error::Keystore(e.to_string()))?
+        .map_err(|e| echat_core::Error::Keystore(e.to_string()))?
     }
 }

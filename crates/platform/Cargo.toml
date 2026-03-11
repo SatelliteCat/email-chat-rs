@@ -8,7 +8,7 @@ license.workspace    = true
 
 [dependencies]
 # Внутренние
-core       = { path = "../core" }
+echat_core = { path = "../core" }
 email      = { path = "../email" }
 storage    = { path = "../storage" }
 encryption = { path = "../encryption" }
@@ -27,6 +27,7 @@ chrono    = { workspace = true }
 uuid      = { workspace = true }
 tracing   = { workspace = true }
 anyhow    = { workspace = true }
+base64    = { workspace = true }
 
 # Keystore — только не-Android (Windows, Linux, macOS)
 [target.'cfg(not(target_os = "android"))'.dependencies]

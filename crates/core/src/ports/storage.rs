@@ -10,13 +10,13 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::{
+    Result,
     models::{
         account::Account,
-        contact::{Contact, ContactStatus},
+        contact::Contact,
         conversation::{Conversation, GroupMember, GroupRole},
         message::{Message, MessageKind, MessageStatus},
     },
-    Result,
 };
 
 // ── Структуры для создания/обновления ────────────────────────────────────────
@@ -91,11 +91,7 @@ pub trait StoragePort: Send + Sync + 'static {
     async fn list_contacts(&self, account_id: Uuid) -> Result<Vec<Contact>>;
     async fn update_contact(&self, id: Uuid, data: UpdateContact) -> Result<()>;
     async fn set_contact_pending(&self, id: Uuid) -> Result<()>;
-    async fn complete_contact_handshake(
-        &self,
-        id: Uuid,
-        public_keys_json: String,
-    ) -> Result<()>;
+    async fn complete_contact_handshake(&self, id: Uuid, public_keys_json: String) -> Result<()>;
     async fn delete_contact(&self, id: Uuid) -> Result<()>;
 
     // ── Беседы ───────────────────────────────────────────────────────────────
@@ -155,10 +151,7 @@ pub trait StoragePort: Send + Sync + 'static {
         limit: usize,
     ) -> Result<Vec<Message>>;
     async fn update_message_status(&self, id: Uuid, status: MessageStatus) -> Result<()>;
-    async fn get_imap_uids_for_deletion(
-        &self,
-        conv_id: Uuid,
-    ) -> Result<Vec<ImapUidEntry>>;
+    async fn get_imap_uids_for_deletion(&self, conv_id: Uuid) -> Result<Vec<ImapUidEntry>>;
     async fn delete_conversation_messages(&self, conv_id: Uuid) -> Result<()>;
     async fn get_queued_messages(&self, account_id: Uuid) -> Result<Vec<Message>>;
 }

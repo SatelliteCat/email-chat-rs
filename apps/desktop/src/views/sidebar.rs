@@ -2,8 +2,8 @@
 
 use chrono::{Local, TimeZone};
 use egui::{
-    Align, Color32, FontId, Frame, Label, Layout, Margin, Response,
-    RichText, Rounding, Sense, Stroke, Ui, Vec2,
+    Align, Align2, Color32, FontId, Frame, Label, Layout, Margin, Response, RichText, Rounding,
+    Sense, Stroke, Ui, Vec2,
 };
 use uuid::Uuid;
 
@@ -16,131 +16,126 @@ use crate::{
 pub fn show(ui: &mut Ui, state: &mut UiState) -> Option<Uuid> {
     let mut selected = None;
 
-    Frame::none()
-        .fill(theme::BG_PANEL)
-        .show(ui, |ui| {
-            ui.set_min_width(270.0);
-            ui.set_max_width(320.0);
+    Frame::none().fill(theme::BG_PANEL).show(ui, |ui| {
+        ui.set_min_width(270.0);
+        ui.set_max_width(320.0);
 
-            // ── Шапка ──────────────────────────────────────────────────────
-            Frame::none()
-                .fill(theme::BG_DARK)
-                .inner_margin(Margin::symmetric(12.0, 10.0))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        // Аватар пользователя (заглушка)
-                        let letter = state
+        // ── Шапка ──────────────────────────────────────────────────────
+        Frame::none()
+            .fill(theme::BG_DARK)
+            .inner_margin(Margin::symmetric(12.0, 10.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    // Аватар пользователя (заглушка)
+                    let letter = state
+                        .account
+                        .as_ref()
+                        .and_then(|a| a.email.chars().next())
+                        .unwrap_or('?')
+                        .to_uppercase()
+                        .next()
+                        .unwrap_or('?');
+
+                    avatar_circle(ui, letter, 32.0, theme::ACCENT);
+
+                    ui.add_space(8.0);
+
+                    ui.vertical(|ui| {
+                        let email = state
                             .account
                             .as_ref()
-                            .and_then(|a| a.email.chars().next())
-                            .unwrap_or('?')
-                            .to_uppercase()
-                            .next()
-                            .unwrap_or('?');
+                            .map(|a| a.email.as_str())
+                            .unwrap_or("—");
+                        ui.label(
+                            RichText::new(email)
+                                .color(theme::TEXT_PRIMARY)
+                                .font(FontId::proportional(13.5))
+                                .strong(),
+                        );
+                        // Индикатор подключения
+                        let (dot, color, label) = if state.sync_connected {
+                            ("●", theme::SUCCESS, "онлайн")
+                        } else {
+                            ("●", theme::TEXT_TIMESTAMP, "оффлайн")
+                        };
+                        ui.label(
+                            RichText::new(format!("{} {}", dot, label))
+                                .font(FontId::proportional(11.0))
+                                .color(color),
+                        );
+                    });
 
-                        avatar_circle(ui, letter, 32.0, theme::ACCENT);
-
-                        ui.add_space(8.0);
-
-                        ui.vertical(|ui| {
-                            let email = state
-                                .account
-                                .as_ref()
-                                .map(|a| a.email.as_str())
-                                .unwrap_or("—");
-                            ui.label(
-                                RichText::new(email)
-                                    .color(theme::TEXT_PRIMARY)
-                                    .font(FontId::proportional(13.5))
-                                    .strong(),
-                            );
-                            // Индикатор подключения
-                            let (dot, color, label) = if state.sync_connected {
-                                ("●", theme::SUCCESS, "онлайн")
-                            } else {
-                                ("●", theme::TEXT_TIMESTAMP, "оффлайн")
-                            };
-                            ui.label(
-                                RichText::new(format!("{} {}", dot, label))
-                                    .font(FontId::proportional(11.0))
-                                    .color(color),
-                            );
-                        });
-
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new("✏").font(FontId::proportional(16.0)),
-                                    )
-                                    .frame(false),
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("✏").font(FontId::proportional(16.0)),
                                 )
-                                .on_hover_text("Новый контакт")
-                                .clicked()
-                            {
-                                state.screen = crate::state::Screen::Contacts;
-                            }
-                        });
+                                .frame(false),
+                            )
+                            .on_hover_text("Новый контакт")
+                            .clicked()
+                        {
+                            state.screen = crate::state::Screen::Contacts;
+                        }
                     });
                 });
+            });
 
-            // ── Поиск ──────────────────────────────────────────────────────
-            Frame::none()
-                .inner_margin(Margin::symmetric(12.0, 8.0))
-                .show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut state.sidebar_search)
-                            .hint_text("🔍 Поиск")
-                            .desired_width(f32::INFINITY)
-                            .font(FontId::proportional(13.5)),
-                    );
-                });
+        // ── Поиск ──────────────────────────────────────────────────────
+        Frame::none()
+            .inner_margin(Margin::symmetric(12.0, 8.0))
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.sidebar_search)
+                        .hint_text("🔍 Поиск")
+                        .desired_width(f32::INFINITY)
+                        .font(FontId::proportional(13.5)),
+                );
+            });
 
-            ui.add(egui::Separator::default().spacing(0.0));
+        ui.add(egui::Separator::default().spacing(0.0));
 
-            // ── Список бесед ───────────────────────────────────────────────
-            let search = state.sidebar_search.to_lowercase();
+        // ── Список бесед ───────────────────────────────────────────────
+        let search = state.sidebar_search.to_lowercase();
 
-            egui::ScrollArea::vertical()
-                .id_source("sidebar_scroll")
-                .show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
+        egui::ScrollArea::vertical()
+            .id_source("sidebar_scroll")
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
 
-                    let items: Vec<_> = state
-                        .conversations
-                        .iter()
-                        .filter(|c| {
-                            search.is_empty()
-                                || c.display_name.to_lowercase().contains(&search)
-                                || c.last_preview.to_lowercase().contains(&search)
-                        })
-                        .cloned()
-                        .collect();
+                let items: Vec<_> = state
+                    .conversations
+                    .iter()
+                    .filter(|c| {
+                        search.is_empty()
+                            || c.display_name.to_lowercase().contains(&search)
+                            || c.last_preview.to_lowercase().contains(&search)
+                    })
+                    .cloned()
+                    .collect();
 
-                    if items.is_empty() {
-                        ui.add_space(40.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                RichText::new("Нет бесед")
-                                    .color(theme::TEXT_TIMESTAMP),
-                            );
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new("Добавьте контакт чтобы начать")
-                                    .font(FontId::proportional(12.0))
-                                    .color(theme::TEXT_TIMESTAMP),
-                            );
-                        });
+                if items.is_empty() {
+                    ui.add_space(40.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("Нет бесед").color(theme::TEXT_TIMESTAMP));
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new("Добавьте контакт чтобы начать")
+                                .font(FontId::proportional(12.0))
+                                .color(theme::TEXT_TIMESTAMP),
+                        );
+                    });
+                }
+
+                for item in &items {
+                    let is_selected = state.selected_conv_id == Some(item.id);
+                    if conversation_row(ui, item, is_selected).clicked() {
+                        selected = Some(item.id);
                     }
-
-                    for item in &items {
-                        let is_selected = state.selected_conv_id == Some(item.id);
-                        if conversation_row(ui, item, is_selected).clicked() {
-                            selected = Some(item.id);
-                        }
-                    }
-                });
-        });
+                }
+            });
+    });
 
     selected
 }
@@ -150,10 +145,8 @@ fn conversation_row(ui: &mut Ui, item: &ConversationItem, is_selected: bool) -> 
     let row_height = 64.0;
     let available_width = ui.available_width();
 
-    let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(available_width, row_height),
-        Sense::click(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(available_width, row_height), Sense::click());
 
     if ui.is_rect_visible(rect) {
         let bg = if is_selected {
@@ -168,11 +161,9 @@ fn conversation_row(ui: &mut Ui, item: &ConversationItem, is_selected: bool) -> 
 
         // Левая полоска выделения
         if is_selected {
-            let stripe = egui::Rect::from_min_size(
-                rect.left_top(),
-                Vec2::new(3.0, rect.height()),
-            );
-            ui.painter().rect_filled(stripe, Rounding::same(0.0), theme::ACCENT);
+            let stripe = egui::Rect::from_min_size(rect.left_top(), Vec2::new(3.0, rect.height()));
+            ui.painter()
+                .rect_filled(stripe, Rounding::same(0.0), theme::ACCENT);
         }
 
         let inner = rect.shrink2(Vec2::new(12.0, 10.0));
@@ -180,7 +171,13 @@ fn conversation_row(ui: &mut Ui, item: &ConversationItem, is_selected: bool) -> 
 
         // Аватар
         let avatar_center = egui::pos2(inner.left() + 22.0, inner.center().y);
-        avatar_circle_at(painter, avatar_center, 22.0, item.avatar_letter, theme::BG_HOVER);
+        avatar_circle_at(
+            painter,
+            avatar_center,
+            22.0,
+            item.avatar_letter,
+            theme::BG_HOVER,
+        );
 
         // Имя и превью
         let text_left = inner.left() + 52.0;
@@ -246,7 +243,10 @@ fn conversation_row(ui: &mut Ui, item: &ConversationItem, is_selected: bool) -> 
         // Разделитель
         let sep_y = rect.bottom() - 0.5;
         painter.line_segment(
-            [egui::pos2(rect.left() + 60.0, sep_y), egui::pos2(rect.right(), sep_y)],
+            [
+                egui::pos2(rect.left() + 60.0, sep_y),
+                egui::pos2(rect.right(), sep_y),
+            ],
             Stroke::new(0.5, theme::SEPARATOR),
         );
     }

@@ -2,12 +2,12 @@
 
 use chrono::{Local, TimeZone};
 use egui::{
-    Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2,
-    RichText, Rounding, ScrollArea, Stroke, Ui,
+    Align, Align2, Color32, FontId, Frame, Layout, Margin, Pos2, RichText, Rounding, ScrollArea,
+    Stroke, Ui,
 };
 use uuid::Uuid;
 
-use core::models::message::{Message, MessageStatus};
+use echat_core::models::message::{Message, MessageStatus};
 
 use crate::{
     runtime::{AppEvent, EventSender},
@@ -54,10 +54,8 @@ fn chat_header(ui: &mut Ui, conv: &ConversationItem, sender: &EventSender) {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
                         .add(
-                            egui::Button::new(
-                                RichText::new("🗑").font(FontId::proportional(16.0)),
-                            )
-                            .frame(false),
+                            egui::Button::new(RichText::new("🗑").font(FontId::proportional(16.0)))
+                                .frame(false),
                         )
                         .on_hover_text("Удалить беседу (с сервера)")
                         .clicked()
@@ -142,11 +140,11 @@ fn message_bubble(ui: &mut Ui, msg: &Message, is_mine: bool) {
 
     let status_icon = if is_mine {
         match msg.status {
-            MessageStatus::Queued    => " ⏳",
-            MessageStatus::Sending   => " ⌛",
-            MessageStatus::Sent      => " ✓",
+            MessageStatus::Queued => " ⏳",
+            MessageStatus::Sending => " ⌛",
+            MessageStatus::Sent => " ✓",
             MessageStatus::Delivered => " ✓✓",
-            MessageStatus::Read      => " ✓✓",
+            MessageStatus::Read => " ✓✓",
         }
     } else {
         ""
@@ -162,7 +160,11 @@ fn message_bubble(ui: &mut Ui, msg: &Message, is_mine: bool) {
         ui.add_space(12.0);
 
         Frame::none()
-            .fill(if is_mine { theme::BG_MSG_OUT } else { theme::BG_MSG_IN })
+            .fill(if is_mine {
+                theme::BG_MSG_OUT
+            } else {
+                theme::BG_MSG_IN
+            })
             .rounding(Rounding {
                 nw: if is_mine { 12.0 } else { 3.0 },
                 ne: if is_mine { 3.0 } else { 12.0 },
@@ -187,7 +189,7 @@ fn message_bubble(ui: &mut Ui, msg: &Message, is_mine: bool) {
                             .font(FontId::proportional(14.5))
                             .color(theme::TEXT_PRIMARY),
                     )
-                    .wrap(true),
+                    .wrap(),
                 );
 
                 ui.with_layout(Layout::right_to_left(Align::BOTTOM), |ui| {

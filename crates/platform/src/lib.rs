@@ -32,7 +32,7 @@ pub use email_adapter::EmailAdapter;
 pub use keystore::PlatformKeystore;
 pub use storage_adapter::StorageAdapter;
 
-use core::{AppConfig, AppState};
+use echat_core::{AppConfig, AppState};
 
 /// Собирает полностью рабочий `AppState` из минимального набора параметров.
 ///

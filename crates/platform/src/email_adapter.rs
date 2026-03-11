@@ -9,11 +9,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Utc;
 
-use core::{
-    ports::email::{EmailTransport, IncomingEmail, OutgoingEmail},
+use echat_core::{
     Error, Result,
+    ports::email::{EmailTransport, IncomingEmail, OutgoingEmail},
 };
 
 /// Адаптер: `core::EmailTransport` поверх `email::EmailClient`.

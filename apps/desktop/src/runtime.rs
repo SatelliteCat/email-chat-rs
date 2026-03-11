@@ -11,39 +11,68 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use core::{
-    models::{account::Account, contact::Contact, conversation::Conversation, message::Message},
+use echat_core::{
     AppState, ChatEvent,
+    models::{account::Account, contact::Contact, conversation::Conversation, message::Message},
 };
 
 /// Все события из async-задач → UI.
-#[derive(Debug)]
 pub enum AppEvent {
     // ── Логин ─────────────────────────────────────────────────────────────
-    LoginAttempt { email: String, password: String },
+    LoginAttempt {
+        email: String,
+        password: String,
+    },
     /// AppState успешно собран, аккаунт готов
-    AccountReady { state: AppState, account: Account },
+    AccountReady {
+        state: AppState,
+        account: Account,
+    },
     AccountError(String),
 
     // ── Данные ────────────────────────────────────────────────────────────
     ConversationsLoaded(Vec<Conversation>),
     ContactsLoaded(Vec<Contact>),
-    HistoryLoaded { conv_id: Uuid, messages: Vec<Message> },
+    HistoryLoaded {
+        conv_id: Uuid,
+        messages: Vec<Message>,
+    },
 
     // ── Сообщения ─────────────────────────────────────────────────────────
-    NewMessage { conv_id: Uuid, message: Message },
-    MessageSent { conv_id: Uuid, message: Message },
+    NewMessage {
+        conv_id: Uuid,
+        message: Message,
+    },
+    MessageSent {
+        conv_id: Uuid,
+        message: Message,
+    },
     SendError(String),
 
     // ── Контакты ──────────────────────────────────────────────────────────
-    AddContact { email: String, name: String },
+    AddContact {
+        email: String,
+        name: String,
+    },
     ContactAdded,
     ContactError(String),
-    OpenChatWith { contact_id: Uuid },
+    OpenChatWith {
+        contact_id: Uuid,
+    },
+    DeleteContact {
+        contact_id: Uuid,
+    },
+    ContactDeleted {
+        contact_id: Uuid,
+    },
 
     // ── Беседы ────────────────────────────────────────────────────────────
-    DeleteConversation { conv_id: Uuid },
-    ConversationDeleted { conv_id: Uuid },
+    DeleteConversation {
+        conv_id: Uuid,
+    },
+    ConversationDeleted {
+        conv_id: Uuid,
+    },
 
     // ── Синхронизация ─────────────────────────────────────────────────────
     SyncConnected(bool),
@@ -54,20 +83,15 @@ pub enum AppEvent {
 impl std::fmt::Debug for AppEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AppEvent::AccountReady { account, .. } =>
-                write!(f, "AccountReady({})", account.email),
-            AppEvent::LoginAttempt { email, .. } =>
-                write!(f, "LoginAttempt({})", email),
-            AppEvent::ConversationsLoaded(v) =>
-                write!(f, "ConversationsLoaded({})", v.len()),
-            AppEvent::ContactsLoaded(v) =>
-                write!(f, "ContactsLoaded({})", v.len()),
-            AppEvent::HistoryLoaded { conv_id, messages } =>
-                write!(f, "HistoryLoaded({}, {} msgs)", conv_id, messages.len()),
-            AppEvent::NewMessage { conv_id, .. } =>
-                write!(f, "NewMessage(conv={})", conv_id),
-            AppEvent::MessageSent { conv_id, .. } =>
-                write!(f, "MessageSent(conv={})", conv_id),
+            AppEvent::AccountReady { account, .. } => write!(f, "AccountReady({})", account.email),
+            AppEvent::LoginAttempt { email, .. } => write!(f, "LoginAttempt({})", email),
+            AppEvent::ConversationsLoaded(v) => write!(f, "ConversationsLoaded({})", v.len()),
+            AppEvent::ContactsLoaded(v) => write!(f, "ContactsLoaded({})", v.len()),
+            AppEvent::HistoryLoaded { conv_id, messages } => {
+                write!(f, "HistoryLoaded({}, {} msgs)", conv_id, messages.len())
+            }
+            AppEvent::NewMessage { conv_id, .. } => write!(f, "NewMessage(conv={})", conv_id),
+            AppEvent::MessageSent { conv_id, .. } => write!(f, "MessageSent(conv={})", conv_id),
             other => write!(f, "{:?}", std::mem::discriminant(other)),
         }
     }
@@ -91,7 +115,12 @@ impl AsyncRuntime {
                 .expect("tokio runtime"),
         );
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        Self { rt, event_tx, event_rx, ctx: None }
+        Self {
+            rt,
+            event_tx,
+            event_rx,
+            ctx: None,
+        }
     }
 
     pub fn set_ctx(&mut self, ctx: egui::Context) {
@@ -106,7 +135,10 @@ impl AsyncRuntime {
     }
 
     pub fn event_sender(&self) -> EventSender {
-        EventSender { tx: self.event_tx.clone(), ctx: self.ctx.clone() }
+        EventSender {
+            tx: self.event_tx.clone(),
+            ctx: self.ctx.clone(),
+        }
     }
 
     pub fn rt(&self) -> Arc<tokio::runtime::Runtime> {
@@ -132,7 +164,7 @@ impl EventSender {
 
 /// Слушает EventBus ядра и пересылает нужные события в UI.
 pub fn subscribe_to_core_events(
-    event_bus: core::EventBus,
+    event_bus: echat_core::EventBus,
     sender: EventSender,
     rt: Arc<tokio::runtime::Runtime>,
 ) {
@@ -140,7 +172,10 @@ pub fn subscribe_to_core_events(
         let mut rx = event_bus.subscribe();
         loop {
             match rx.recv().await {
-                Ok(ChatEvent::NewMessage { conversation_id, message }) => {
+                Ok(ChatEvent::NewMessage {
+                    conversation_id,
+                    message,
+                }) => {
                     sender.send(AppEvent::NewMessage {
                         conv_id: conversation_id,
                         message,

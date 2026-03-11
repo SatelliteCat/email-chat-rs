@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
 use crate::Result;
 
@@ -42,10 +41,7 @@ pub trait EmailTransport: Send + Sync + 'static {
     async fn send(&self, email: OutgoingEmail) -> Result<()>;
 
     /// Получает новые письма из папки EChat начиная с UID.
-    async fn fetch_new(
-        &self,
-        since_uid: Option<u32>,
-    ) -> Result<Vec<IncomingEmail>>;
+    async fn fetch_new(&self, since_uid: Option<u32>) -> Result<Vec<IncomingEmail>>;
 
     /// Ожидает новых писем через IMAP IDLE.
     /// Возвращает `true` если пришло новое письмо, `false` при таймауте.

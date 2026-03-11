@@ -7,11 +7,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use core::models::{
-    account::Account,
-    contact::Contact,
-    conversation::Conversation,
-    message::Message,
+use echat_core::models::{
+    account::Account, contact::Contact, conversation::Conversation, message::Message,
 };
 
 /// Главный экран приложения.
@@ -99,9 +96,7 @@ impl UiState {
     /// Убирает устаревшие toasts (старше 4 секунд).
     pub fn expire_toasts(&mut self) {
         let now = Utc::now();
-        self.toasts.retain(|t| {
-            (now - t.shown_at).num_seconds() < 4
-        });
+        self.toasts.retain(|t| (now - t.shown_at).num_seconds() < 4);
     }
 
     /// Добавляет или обновляет сообщение в открытом чате.
@@ -156,7 +151,13 @@ impl ConversationItem {
             last_preview: conv.last_msg_preview.clone().unwrap_or_default(),
             last_msg_at: conv.last_msg_at,
             unread: conv.unread_count,
-            avatar_letter: display_name.chars().next().unwrap_or('?').to_uppercase().next().unwrap_or('?'),
+            avatar_letter: display_name
+                .chars()
+                .next()
+                .unwrap_or('?')
+                .to_uppercase()
+                .next()
+                .unwrap_or('?'),
         }
     }
 }

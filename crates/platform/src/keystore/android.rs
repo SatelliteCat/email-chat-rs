@@ -31,8 +31,8 @@
 //! ```
 
 use async_trait::async_trait;
-use core::ports::keystore::KeystorePort;
-use core::Result;
+use echat_core::Result;
+use echat_core::ports::keystore::KeystorePort;
 
 /// Android Keystore реализация (stub — требует JNI при сборке под Android).
 pub struct AndroidKeystore;

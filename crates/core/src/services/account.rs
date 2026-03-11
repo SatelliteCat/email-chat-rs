@@ -6,13 +6,14 @@
 use uuid::Uuid;
 
 use crate::{
+    Error, Result,
     models::account::{Account, Provider},
     ports::{
-        email::DynEmailTransport,
-        keystore::{app_password_key, identity_seed_key, DynKeystore, SERVICE_IDENTITY, SERVICE_MAIL},
+        keystore::{
+            DynKeystore, SERVICE_IDENTITY, SERVICE_MAIL, app_password_key, identity_seed_key,
+        },
         storage::{CreateAccount, DynStorage},
     },
-    Error, Result,
 };
 
 pub struct AccountService {
@@ -39,7 +40,10 @@ impl AccountService {
     ) -> Result<Account> {
         // Проверяем дубликат
         if self.storage.get_account_by_email(&email).await.is_ok() {
-            return Err(Error::AlreadyExists(format!("Аккаунт {} уже добавлен", email)));
+            return Err(Error::AlreadyExists(format!(
+                "Аккаунт {} уже добавлен",
+                email
+            )));
         }
 
         let id = Uuid::new_v4();
@@ -49,14 +53,22 @@ impl AccountService {
 
         // Сохраняем app_password в keystore
         self.keystore
-            .set(SERVICE_MAIL, &app_password_key(&email), app_password.as_bytes())
+            .set(
+                SERVICE_MAIL,
+                &app_password_key(&email),
+                app_password.as_bytes(),
+            )
             .await?;
 
         // Генерируем identity keypair и сохраняем seed
         let keypair = encryption::keypair::IdentityKeypair::generate();
         let seed_bytes = keypair.seed().as_bytes();
         self.keystore
-            .set(SERVICE_IDENTITY, &identity_seed_key(&id.to_string()), seed_bytes)
+            .set(
+                SERVICE_IDENTITY,
+                &identity_seed_key(&id.to_string()),
+                seed_bytes,
+            )
             .await?;
 
         // Сохраняем аккаунт в БД
@@ -84,7 +96,8 @@ impl AccountService {
             .get(SERVICE_MAIL, &app_password_key(email))
             .await?
             .ok_or_else(|| Error::NotFound(format!("Пароль для {} не найден", email)))?;
-        String::from_utf8(bytes).map_err(|_| Error::Internal("Некорректный пароль в keystore".into()))
+        String::from_utf8(bytes)
+            .map_err(|_| Error::Internal("Некорректный пароль в keystore".into()))
     }
 
     /// Загружает identity keypair из keystore.
@@ -94,7 +107,10 @@ impl AccountService {
     ) -> Result<encryption::keypair::IdentityKeypair> {
         let seed_bytes = self
             .keystore
-            .get(SERVICE_IDENTITY, &identity_seed_key(&account_id.to_string()))
+            .get(
+                SERVICE_IDENTITY,
+                &identity_seed_key(&account_id.to_string()),
+            )
             .await?
             .ok_or_else(|| Error::NotFound("Identity ключ не найден".into()))?;
 
@@ -107,6 +123,31 @@ impl AccountService {
         ))
     }
 
+    /// Загружает identity keypair, или генерирует новый если не найден.
+    pub async fn load_or_create_keypair(
+        &self,
+        account_id: Uuid,
+    ) -> Result<encryption::keypair::IdentityKeypair> {
+        // Пробуем загрузить существующий
+        if let Ok(keypair) = self.load_keypair(account_id).await {
+            return Ok(keypair);
+        }
+
+        // Генерируем новый и сохраняем
+        let keypair = encryption::keypair::IdentityKeypair::generate();
+        let seed_bytes = keypair.seed().as_bytes();
+        self.keystore
+            .set(
+                SERVICE_IDENTITY,
+                &identity_seed_key(&account_id.to_string()),
+                seed_bytes,
+            )
+            .await?;
+
+        tracing::info!("Identity keypair сгенерирован для аккаунта {}", account_id);
+        Ok(keypair)
+    }
+
     /// Список всех аккаунтов.
     pub async fn list_accounts(&self) -> Result<Vec<Account>> {
         self.storage.list_accounts().await
@@ -117,8 +158,14 @@ impl AccountService {
         let account = self.storage.get_account(id).await?;
 
         // Удаляем секреты из keystore
-        let _ = self.keystore.delete(SERVICE_MAIL, &app_password_key(&account.email)).await;
-        let _ = self.keystore.delete(SERVICE_IDENTITY, &identity_seed_key(&id.to_string())).await;
+        let _ = self
+            .keystore
+            .delete(SERVICE_MAIL, &app_password_key(&account.email))
+            .await;
+        let _ = self
+            .keystore
+            .delete(SERVICE_IDENTITY, &identity_seed_key(&id.to_string()))
+            .await;
 
         // Удаляем из БД (CASCADE удалит всё остальное)
         self.storage.delete_account(id).await?;
@@ -129,13 +176,7 @@ impl AccountService {
 
 fn provider_config(provider: &Provider) -> (String, u16, String, u16) {
     match provider {
-        Provider::MailRu => (
-            "imap.mail.ru".into(), 993,
-            "smtp.mail.ru".into(), 465,
-        ),
-        Provider::Yandex => (
-            "imap.yandex.ru".into(), 993,
-            "smtp.yandex.ru".into(), 465,
-        ),
+        Provider::MailRu => ("imap.mail.ru".into(), 993, "smtp.mail.ru".into(), 465),
+        Provider::Yandex => ("imap.yandex.ru".into(), 993, "smtp.yandex.ru".into(), 465),
     }
 }
