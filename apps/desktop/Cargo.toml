@@ -1,0 +1,51 @@
+[package]
+name        = "echat-desktop"
+description = "EChat desktop application (Windows, Linux, macOS)"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+# repository.workspace = true
+
+# Скрываем консоль на Windows в release сборке
+[[bin]]
+name = "echat"
+path = "src/main.rs"
+
+[dependencies]
+# Внутренние
+platform   = { path = "../../crates/platform" }
+core       = { path = "../../crates/core" }
+encryption = { path = "../../crates/encryption" }
+
+# UI
+eframe      = { workspace = true }
+egui        = { workspace = true }
+egui_extras = { workspace = true }
+
+# Async
+tokio  = { workspace = true }
+
+# Утилиты
+anyhow    = { workspace = true }
+chrono    = { workspace = true }
+uuid      = { workspace = true }
+tracing   = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde     = { workspace = true }
+
+# Платформо-специфичные директории
+dirs = "5"
+
+[target.'cfg(windows)'.build-dependencies]
+# Скрываем консоль на Windows
+winresource = "0.1"
+
+# В release — без консоли на Windows
+[target.'cfg(windows)'.dependencies]
+# (пустой — только конфигурация ниже работает)
+
+[profile.release]
+opt-level   = 3
+lto         = true
+strip       = true
+codegen-units = 1
