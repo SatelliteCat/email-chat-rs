@@ -6,8 +6,8 @@ members = [
     "crates/email",
     "crates/storage",
     "crates/core",
+    "crates/platform",
     # Будут добавлены по мере разработки:
-    # "crates/platform",
     # "apps/desktop",
     # "apps/mobile",
 ]
@@ -54,6 +54,7 @@ image    = { version = "0.25" }
 
 # Email — IMAP/SMTP
 async-imap       = { version = "0.9", default-features = false, features = ["runtime-tokio"] }
+async-native-tls = { version = "0.5" }
 lettre           = { version = "0.11", default-features = false, features = [
     "builder", "tokio1", "tokio1-native-tls", "smtp-transport",
 ] }
@@ -64,14 +65,11 @@ base64           = { version = "0.22" }
 
 # SQLite
 sqlx = { version = "0.8", default-features = false, features = [
-    "runtime-tokio",
-    "tls-native-tls",
-    "sqlite",
-    "macros",
-    "migrate",
-    "chrono",
-    "uuid",
+    "runtime-tokio", "tls-native-tls", "sqlite", "macros", "migrate", "chrono", "uuid",
 ] }
+
+# Keystore
+keyring = { version = "3", features = ["tokio"] }
 
 # Логирование
 tracing            = { version = "0.1" }
@@ -80,3 +78,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Тесты
 hex        = { version = "0.4" }
 tokio-test = { version = "0.4" }
+async-trait = "0.1"

@@ -1,0 +1,39 @@
+[package]
+name        = "platform"
+description = "Platform adapters: EmailTransport, StoragePort, KeystorePort implementations"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+# repository.workspace = true
+
+[dependencies]
+# Внутренние
+core       = { path = "../core" }
+email      = { path = "../email" }
+storage    = { path = "../storage" }
+encryption = { path = "../encryption" }
+
+# Async
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+
+# Сериализация
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# Утилиты
+thiserror = { workspace = true }
+chrono    = { workspace = true }
+uuid      = { workspace = true }
+tracing   = { workspace = true }
+anyhow    = { workspace = true }
+
+# Keystore — только не-Android (Windows, Linux, macOS)
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { workspace = true }
+
+[dev-dependencies]
+tokio-test         = { workspace = true }
+tracing-subscriber = { workspace = true }
+hex                = { workspace = true }
+rand               = { workspace = true }
