@@ -121,14 +121,9 @@ pub fn encode_handshake(
     from: &str,
     to: &str,
     handshake_base64: &str,
-    is_ack: bool,
+    _is_ack: bool,
 ) -> OutgoingMessage {
-    let kind = if is_ack {
-        BodyKind::Handshake // Ack выглядит как обычное зашифрованное
-    } else {
-        BodyKind::Handshake
-    };
-    let email = disguise::build_email(handshake_base64, kind);
+    let email = disguise::build_email(handshake_base64, BodyKind::Handshake);
     OutgoingMessage {
         from: from.to_string(),
         to: vec![to.to_string()],

@@ -41,6 +41,7 @@ impl StorageAdapter {
 
 fn to_core_provider(p: &Provider) -> CoreProvider {
     match p {
+        Provider::Gmail => CoreProvider::Gmail,
         Provider::MailRu => CoreProvider::MailRu,
         Provider::Yandex => CoreProvider::Yandex,
     }
@@ -48,6 +49,7 @@ fn to_core_provider(p: &Provider) -> CoreProvider {
 
 fn from_core_provider(p: &CoreProvider) -> Provider {
     match p {
+        CoreProvider::Gmail => Provider::Gmail,
         CoreProvider::MailRu => Provider::MailRu,
         CoreProvider::Yandex => Provider::Yandex,
     }

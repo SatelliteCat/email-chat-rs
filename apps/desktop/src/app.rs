@@ -10,7 +10,7 @@ use std::sync::Arc;
 use egui::{CentralPanel, Context, Frame, SidePanel, TopBottomPanel};
 use uuid::Uuid;
 
-use echat_core::{AppConfig, AppState};
+use echat_core::{AppConfig, AppState, sync::engine::SyncCommand};
 
 use crate::{
     runtime::{AppEvent, AsyncRuntime, EventSender, subscribe_to_core_events},
@@ -25,6 +25,10 @@ pub struct EchatApp {
     /// ID аккаунта из БД
     account_id: Option<Uuid>,
     ui: UiState,
+    /// Handle задачи SyncEngine
+    _sync_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Sender для команд SyncEngine (должен жить пока SyncEngine работает)
+    _sync_cmd_tx: Option<tokio::sync::mpsc::Sender<SyncCommand>>,
 }
 
 impl EchatApp {
@@ -39,6 +43,8 @@ impl EchatApp {
             app_state: None,
             account_id: None,
             ui: UiState::default(),
+            _sync_handle: None,
+            _sync_cmd_tx: None,
         }
     }
 }
@@ -77,11 +83,18 @@ impl EchatApp {
 
             AppEvent::AccountReady { state, account } => {
                 let event_bus = state.events.clone();
+
+                // Запускаем SyncEngine для получения новых писем
+                let (cmd_tx, sync_future) = state.spawn_sync(account.id);
+                let sync_handle = self.rt.spawn(sync_future);
+
                 self.app_state = Some(Arc::new(state));
                 self.account_id = Some(account.id);
                 self.ui.account = Some(account);
                 self.ui.login.is_loading = false;
                 self.ui.screen = Screen::Main;
+                self._sync_handle = Some(sync_handle);
+                self._sync_cmd_tx = Some(cmd_tx);
 
                 // Подписываемся на события ядра
                 subscribe_to_core_events(event_bus, self.rt.event_sender(), self.rt.rt());
@@ -117,6 +130,12 @@ impl EchatApp {
                         ConversationItem::from_conversation(c, &name)
                     })
                     .collect();
+
+                // Если есть отложенное открытие чата — открываем его
+                if let Some((conv_id, _contact_id)) = self.ui.pending_chat_open.take() {
+                    self.select_conversation(conv_id);
+                    self.ui.screen = Screen::Main;
+                }
             }
 
             AppEvent::ContactsLoaded(contacts) => {
@@ -164,6 +183,17 @@ impl EchatApp {
                 self.open_chat_with(contact_id);
             }
 
+            AppEvent::ChatCreated {
+                conv_id,
+                contact_id,
+            } => {
+                // Беседа создана — загружаем контакты (для имени) и выбираем беседу
+                self.load_contacts();
+                self.load_conversations();
+                // Дадим UI обновиться, затем выберем беседу
+                self.ui.pending_chat_open = Some((conv_id, contact_id));
+            }
+
             AppEvent::DeleteContact { contact_id } => {
                 self.spawn_delete_contact(contact_id);
             }
@@ -171,6 +201,12 @@ impl EchatApp {
             AppEvent::ContactDeleted { contact_id } => {
                 self.ui.contacts.retain(|c| c.id != contact_id);
                 self.ui.toast_info("Контакт удалён");
+            }
+
+            AppEvent::ContactActivated { email, .. } => {
+                self.ui
+                    .toast_info(format!("Контакт {} активирован!", email));
+                self.load_contacts();
             }
 
             // ── Синхронизация ─────────────────────────────────────────────
@@ -328,7 +364,7 @@ impl EchatApp {
                 Some(p) => p,
                 None => {
                     sender.send(AppEvent::AccountError(
-                        "Поддерживаются только mail.ru и yandex.ru".into(),
+                        "Поддерживаются только Gmail, mail.ru и yandex.ru".into(),
                     ));
                     return;
                 }
@@ -344,8 +380,17 @@ impl EchatApp {
                 // Уже существует — загружаем и убеждаемся что keypair есть
                 Err(echat_core::Error::AlreadyExists(_)) => {
                     match state.account_service.list_accounts().await {
-                        Ok(mut list) if !list.is_empty() => {
-                            let acc = list.remove(0);
+                        Ok(list) if !list.is_empty() => {
+                            let acc = match list.into_iter().find(|a| a.email == email) {
+                                Some(acc) => acc,
+                                None => {
+                                    // Этого не должно произойти, если мы получили AlreadyExists
+                                    sender.send(AppEvent::AccountError(
+                                        "Не удалось найти существующий аккаунт".into(),
+                                    ));
+                                    return;
+                                }
+                            };
                             // Генерируем keypair если отсутствует
                             if let Err(e) =
                                 state.account_service.load_or_create_keypair(acc.id).await
@@ -505,12 +550,12 @@ impl EchatApp {
 
     fn open_chat_with(&mut self, contact_id: Uuid) {
         // Ищем уже существующую direct-беседу
-        let existing = self
+        let existing_conv_id = self
             .ui
             .contacts
             .iter()
             .find(|c| c.id == contact_id)
-            .map(|c| {
+            .and_then(|c| {
                 self.ui
                     .conversations
                     .iter()
@@ -518,16 +563,50 @@ impl EchatApp {
                         // Используем display_name как прокси (до полного Conversation хранения)
                         conv.display_name == c.name || conv.display_name == c.email
                     })
-                    .map(|c| c.id)
+                    .map(|conv| conv.id)
             });
 
-        if let Some(Some(conv_id)) = existing {
+        if let Some(conv_id) = existing_conv_id {
             self.select_conversation(conv_id);
             self.ui.screen = Screen::Main;
         } else {
-            // Беседы нет — создадим при первой отправке
-            self.ui.screen = Screen::Main;
+            // Беседы нет — создаём новую
+            self.spawn_create_chat(contact_id);
         }
+    }
+
+    fn spawn_create_chat(&mut self, contact_id: Uuid) {
+        let (state, account_id) = match self.services() {
+            Some(x) => x,
+            None => return,
+        };
+        let sender = self.rt.event_sender();
+
+        self.rt.spawn(async move {
+            // Создаём беседу через ChatService
+            let result = state
+                .chat_service
+                .get_or_create_direct_conversation(account_id, contact_id)
+                .await;
+
+            match result {
+                Ok(conv) => {
+                    // Загружаем обновлённый список бесед
+                    match state.chat_service.list_conversations(account_id).await {
+                        Ok(convs) => sender.send(AppEvent::ConversationsLoaded(convs)),
+                        Err(e) => tracing::warn!("Ошибка загрузки бесед после создания: {}", e),
+                    }
+                    // Отправляем событие для открытия чата
+                    sender.send(AppEvent::ChatCreated {
+                        conv_id: conv.id,
+                        contact_id,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("Ошибка создания беседы: {}", e);
+                }
+            }
+        });
     }
 
     fn spawn_delete_conversation(&mut self, conv_id: Uuid) {
@@ -580,6 +659,7 @@ fn provider_from_email(email: &str) -> Option<echat_core::models::account::Provi
     use echat_core::models::account::Provider;
     let domain = email.split('@').nth(1)?;
     match domain {
+        "gmail.com" | "googlemail.com" => Some(Provider::Gmail),
         "mail.ru" | "inbox.ru" | "list.ru" | "bk.ru" => Some(Provider::MailRu),
         "yandex.ru" | "ya.ru" | "yandex.com" | "yandex.kz" | "yandex.by" => Some(Provider::Yandex),
         _ => None,

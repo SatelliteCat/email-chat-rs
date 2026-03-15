@@ -48,6 +48,9 @@ pub struct UiState {
     pub selected_conv_id: Option<Uuid>,
     pub sidebar_search: String,
 
+    // ── Ожидает открытия чата после создания беседы ─────────────────────────
+    pub pending_chat_open: Option<(Uuid, Uuid)>, // (conv_id, contact_id)
+
     // ── Открытый чат ─────────────────────────────────────────────────────────
     pub chat: ChatUiState,
 

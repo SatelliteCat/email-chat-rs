@@ -1,6 +1,7 @@
 //! ContactService — CRUD контактов и запуск handshake.
 
 use uuid::Uuid;
+use email;
 
 use crate::{
     Error, Result,
@@ -113,16 +114,23 @@ impl ContactService {
         let handshake_b64 = handshake_msg.to_base64()?;
 
         // Строим письмо через codec
-        let outgoing = OutgoingEmail {
-            from: account.email.clone(),
-            to: vec![contact.email.clone()],
-            subject: encryption::disguise::random_subject(),
-            body: handshake_b64,
-            extra_headers: vec![("X-EChat".into(), "1".into())],
+        let outgoing_msg = email::codec::encode_handshake(
+            &account.email,
+            &contact.email,
+            &handshake_b64,
+            false,
+        );
+
+        let outgoing_email = OutgoingEmail {
+            from: outgoing_msg.from,
+            to: outgoing_msg.to,
+            subject: outgoing_msg.subject,
+            body: outgoing_msg.body,
+            extra_headers: outgoing_msg.extra_headers,
         };
 
         // Пробуем отправить
-        match self.email.send(outgoing).await {
+        match self.email.send(outgoing_email).await {
             Ok(()) => {
                 self.storage.set_contact_pending(contact_id).await?;
                 tracing::info!("Handshake отправлен: {} → {}", account.email, contact.email);
@@ -217,17 +225,24 @@ impl ContactService {
         let ack_msg = encryption::handshake::HandshakeMessage::new_ack(&keypair, &account.email);
         let ack_b64 = ack_msg.to_base64()?;
 
-        self.email
-            .send(OutgoingEmail {
-                from: account.email.clone(),
-                to: vec![from_email.to_string()],
-                subject: encryption::disguise::random_subject(),
-                body: ack_b64,
-                extra_headers: vec![("X-EChat".into(), "1".into())],
-            })
-            .await?;
+        let outgoing_msg =
+            email::codec::encode_handshake(&account.email, from_email, &ack_b64, true);
 
-        tracing::info!("Handshake Ack отправлен → {}", from_email);
+        let outgoing_email = OutgoingEmail {
+            from: outgoing_msg.from,
+            to: outgoing_msg.to,
+            subject: outgoing_msg.subject,
+            body: outgoing_msg.body,
+            extra_headers: outgoing_msg.extra_headers,
+        };
+        let send_result = self.email.send(outgoing_email).await;
+        if let Err(e) = send_result {
+            tracing::error!("Ошибка отправки Ack: {}", e);
+            // Не возвращаем ошибку, т.к. мы уже сохранили ключи контакта.
+            // Ack будет повторно отправлен при следующей синхронизации (TODO).
+        } else {
+            tracing::info!("Handshake Ack отправлен → {}", from_email);
+        }
 
         self.events.emit(ChatEvent::ContactActivated {
             contact_id: contact.id,

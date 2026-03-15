@@ -206,6 +206,7 @@ pub struct ImapUidRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
+    Gmail,
     MailRu,
     Yandex,
 }
@@ -213,6 +214,7 @@ pub enum Provider {
 impl Provider {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Provider::Gmail => "gmail",
             Provider::MailRu => "mailru",
             Provider::Yandex => "yandex",
         }
@@ -220,6 +222,7 @@ impl Provider {
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
+            "gmail" => Some(Provider::Gmail),
             "mailru" => Some(Provider::MailRu),
             "yandex" => Some(Provider::Yandex),
             _ => None,

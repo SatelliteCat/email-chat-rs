@@ -7,7 +7,10 @@
 
 use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
-    message::Mailbox,
+    message::{
+        Mailbox, SinglePart,
+        header::{ContentTransferEncoding, ContentType, HeaderName, HeaderValue},
+    },
     transport::smtp::{
         authentication::Credentials,
         client::{Tls, TlsParameters},
@@ -41,12 +44,12 @@ impl SmtpConnection {
         })
     }
 
-    /// Отправляет письмо.
-    pub async fn send(&self, msg: &OutgoingMessage, config: &ProviderConfig) -> Result<()> {
+    /// Отправляет письмо и возвращает его сырые байты.
+    pub async fn send(&self, msg: &OutgoingMessage, config: &ProviderConfig) -> Result<Vec<u8>> {
         let transport = build_transport(config)?;
         let email = build_email(msg, config)?;
 
-        transport.send(email).await.map_err(|e| {
+        transport.send(email.clone()).await.map_err(|e| {
             let s = e.to_string();
             if s.contains("535") || s.contains("Authentication") {
                 Error::Auth
@@ -56,7 +59,9 @@ impl SmtpConnection {
         })?;
 
         info!("Письмо отправлено: {} → {:?}", msg.from, msg.to);
-        Ok(())
+
+        // Возвращаем сырые байты письма для сохранения в папку
+        Ok(email.formatted())
     }
 }
 
@@ -117,15 +122,22 @@ fn build_email(msg: &OutgoingMessage, _config: &ProviderConfig) -> Result<Messag
 
     // Добавляем кастомные заголовки (X-EChat: 1 и др.)
     for (name, value) in &msg.extra_headers {
-        // lettre не поддерживает произвольные заголовки напрямую через builder,
-        // поэтому используем костыль через subject + добавление в body
-        // TODO: когда lettre добавит поддержку — использовать нативно
-        // Пока X-EChat кодируем как часть тела (disguise обрабатывает)
-        let _ = (name, value); // используется в codec.rs
+        builder = builder.raw_header(HeaderValue::new(
+            HeaderName::new_from_ascii(name.clone()).unwrap(),
+            value.clone(),
+        ));
     }
 
+    // Явно указываем Content-Transfer-Encoding: base64
+    // Тело письма уже содержит base64-данные, поэтому quoted-printable
+    // испортит их (добавит = в концах строк)
     let email = builder
-        .body(msg.body.clone())
+        .singlepart(
+            SinglePart::builder()
+                .header(ContentType::TEXT_PLAIN)
+                .header(ContentTransferEncoding::Base64)
+                .body(msg.body.clone()),
+        )
         .map_err(|e| Error::Smtp(e.to_string()))?;
 
     Ok(email)

@@ -37,7 +37,7 @@ pub struct IncomingEmail {
 /// Абстракция над IMAP/SMTP транспортом.
 #[async_trait]
 pub trait EmailTransport: Send + Sync + 'static {
-    /// Отправляет письмо через SMTP.
+    /// Отправляет письмо через SMTP и сохраняет копию в папке.
     async fn send(&self, email: OutgoingEmail) -> Result<()>;
 
     /// Получает новые письма из папки EChat начиная с UID.
@@ -49,6 +49,9 @@ pub trait EmailTransport: Send + Sync + 'static {
 
     /// Удаляет письма с сервера.
     async fn delete_messages(&self, folder: &str, uids: &[u32]) -> Result<()>;
+
+    /// Перемещает письма из одной папки в другую.
+    async fn move_messages(&self, from_folder: &str, to_folder: &str, uids: &[u32]) -> Result<()>;
 
     /// Создаёт папку EChat если её нет.
     async fn ensure_echat_folder(&self) -> Result<()>;

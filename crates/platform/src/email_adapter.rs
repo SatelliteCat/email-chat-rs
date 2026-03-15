@@ -70,6 +70,13 @@ impl EmailTransport for EmailAdapter {
             .map_err(|e| Error::Transport(e.to_string()))
     }
 
+    async fn move_messages(&self, from_folder: &str, to_folder: &str, uids: &[u32]) -> Result<()> {
+        self.client
+            .move_messages(from_folder, to_folder, uids)
+            .await
+            .map_err(|e| Error::Transport(e.to_string()))
+    }
+
     async fn ensure_echat_folder(&self) -> Result<()> {
         self.client
             .ensure_echat_folder()

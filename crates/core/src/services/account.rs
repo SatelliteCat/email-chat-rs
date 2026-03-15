@@ -26,6 +26,11 @@ impl AccountService {
         Self { storage, keystore }
     }
 
+    /// Возвращает доступ к хранилищу.
+    pub fn storage(&self) -> &DynStorage {
+        &self.storage
+    }
+
     /// Добавляет новый аккаунт.
     ///
     /// 1. Проверяет что аккаунта с таким email ещё нет
@@ -176,6 +181,7 @@ impl AccountService {
 
 fn provider_config(provider: &Provider) -> (String, u16, String, u16) {
     match provider {
+        Provider::Gmail => ("imap.gmail.com".into(), 993, "smtp.gmail.com".into(), 465),
         Provider::MailRu => ("imap.mail.ru".into(), 993, "smtp.mail.ru".into(), 465),
         Provider::Yandex => ("imap.yandex.ru".into(), 993, "smtp.yandex.ru".into(), 465),
     }

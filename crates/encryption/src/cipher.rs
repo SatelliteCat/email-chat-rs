@@ -50,8 +50,9 @@ impl EncryptedPayload {
     pub fn from_base64(s: &str) -> Result<Self> {
         use base64::{engine::general_purpose::STANDARD, Engine};
 
+        let sanitized: String = s.chars().filter(|c| !c.is_whitespace()).collect();
         let bytes = STANDARD
-            .decode(s.trim())
+            .decode(&sanitized)
             .map_err(|_| Error::Decrypt)?;
 
         if bytes.len() < 4 + 1 + 12 + 16 {

@@ -41,20 +41,18 @@ impl std::fmt::Display for ContactStatus {
 /// Публичные ключи контакта — после успешного handshake.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContactPublicKeys {
-    /// X25519 pubkey для DH (32 байта, hex)
-    pub x25519: String,
-    /// Ed25519 pubkey для верификации подписей (32 байта, hex)
-    pub ed25519: String,
+    /// X25519 pubkey для DH (32 байта)
+    pub x25519: [u8; 32],
+    /// Ed25519 pubkey для верификации подписей (32 байта)
+    pub ed25519: [u8; 32],
 }
 
 impl ContactPublicKeys {
     pub fn x25519_bytes(&self) -> Option<[u8; 32]> {
-        let bytes = hex::decode(&self.x25519).ok()?;
-        bytes.try_into().ok()
+        Some(self.x25519)
     }
 
     pub fn ed25519_bytes(&self) -> Option<[u8; 32]> {
-        let bytes = hex::decode(&self.ed25519).ok()?;
-        bytes.try_into().ok()
+        Some(self.ed25519)
     }
 }

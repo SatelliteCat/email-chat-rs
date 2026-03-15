@@ -110,9 +110,17 @@ impl EmailClient {
         Ok(Self { imap, smtp, config })
     }
 
-    /// Отправляет исходящее сообщение.
+    /// Отправляет исходящее сообщение и сохраняет копию в папку.
     pub async fn send_message(&self, msg: OutgoingMessage) -> Result<()> {
-        self.smtp.send(&msg, &self.config).await
+        // Отправляем через SMTP и получаем сырые байты
+        let email_bytes = self.smtp.send(&msg, &self.config).await?;
+
+        // Сохраняем копию в папку EChat через IMAP APPEND
+        self.imap
+            .append_message(&self.config.echat_folder, &email_bytes)
+            .await?;
+
+        Ok(())
     }
 
     /// Получает новые сообщения из папки echat начиная с UID.
@@ -134,6 +142,19 @@ impl EmailClient {
     /// Удаляет письма с сервера по UID.
     pub async fn delete_messages(&self, folder: &str, uids: &[MessageUid]) -> Result<()> {
         self.imap.delete_messages(folder, uids).await
+    }
+
+    /// Перемещает письма из одной папки в другую.
+    pub async fn move_messages(
+        &self,
+        from_folder: &str,
+        to_folder: &str,
+        uids: &[u32],
+    ) -> Result<()> {
+        let uid_objs: Vec<MessageUid> = uids.iter().map(|u| MessageUid(*u)).collect();
+        self.imap
+            .move_messages(from_folder, to_folder, &uid_objs)
+            .await
     }
 
     /// Убеждается что папка для echat сообщений существует, создаёт если нет.

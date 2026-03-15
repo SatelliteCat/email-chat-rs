@@ -67,7 +67,7 @@ pub fn start(
     (cmd_tx, handle)
 }
 
-async fn run_sync_loop(
+pub(crate) async fn run_sync_loop(
     account_id: Uuid,
     email: DynEmailTransport,
     storage: DynStorage,
@@ -82,11 +82,6 @@ async fn run_sync_loop(
 
     tracing::info!("SyncEngine запущен для аккаунта {}", account_id);
     events.emit(ChatEvent::SyncStateChanged { connected: false });
-
-    // Убеждаемся что папка EChat существует
-    if let Err(e) = email.ensure_echat_folder().await {
-        tracing::warn!("Не удалось создать папку EChat: {}", e);
-    }
 
     loop {
         // Получаем последний синхронизированный UID
@@ -138,7 +133,6 @@ async fn run_sync_loop(
                 match idle_result {
                     Ok(has_new) => {
                         if has_new {
-                            tracing::debug!("IDLE: новые письма, fetching...");
                             // Следующая итерация цикла подхватит их
                         }
                         // таймаут IDLE — тоже OK, просто переподключаемся
@@ -179,9 +173,12 @@ async fn fetch_and_process(
     contact_svc: &ContactService,
     chat_svc: &ChatService,
 ) -> crate::Result<Option<u32>> {
+    tracing::info!("Fetch новых писем начиная с UID: {:?}", since_uid);
+
     let messages = email.fetch_new(since_uid).await?;
 
     if messages.is_empty() {
+        tracing::debug!("Новых писем нет");
         return Ok(None);
     }
 
@@ -192,9 +189,15 @@ async fn fetch_and_process(
     for msg in messages {
         let uid = msg.uid;
 
-        if let Err(e) =
-            super::processor::process_incoming(&msg, account_id, account_svc, contact_svc, chat_svc)
-                .await
+        if let Err(e) = super::processor::process_incoming(
+            &msg,
+            account_id,
+            email,
+            account_svc,
+            contact_svc,
+            chat_svc,
+        )
+        .await
         {
             tracing::warn!("Ошибка обработки письма uid={}: {}", uid, e);
             // Не прерываем — продолжаем остальные

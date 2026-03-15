@@ -82,3 +82,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex         = { version = "0.4" }
 tokio-test  = { version = "0.4" }
 async-trait = "0.1.84"
+
+[profile.dev]
+debug = 1            # 1 = только номера строк (хватит для паник), 2 = полная отладка (ломает линкер)
+incremental = false  # Убирает риск битых кэшей при линковке крупных UI библиотек
+
+[profile.release]
+lto = true           # Оптимизация при линковке (для финальной сборки)
+codegen-units = 1    # Максимальное сжатие и скорость работы приложения

@@ -49,15 +49,20 @@ pub async fn build_app_state(
     db_path: &str,
     config: AppConfig,
 ) -> anyhow::Result<AppState> {
-    tracing::info!("Инициализация platform для {}", email_addr);
-
     // 1. База данных
     let db = storage::Database::open(db_path).await?;
-    let storage_adapter = StorageAdapter::new(db);
+    let storage_adapter = StorageAdapter::new(db.clone());
 
     // 2. Почтовый клиент
-    let provider_config = email::providers::ProviderConfig::detect(email_addr, app_password)
+    // Сначала определяем конфиг по умолчанию
+    let mut provider_config = email::providers::ProviderConfig::detect(email_addr, app_password)
         .ok_or_else(|| anyhow::anyhow!("Неизвестный провайдер для {}", email_addr))?;
+
+    // Пробуем загрузить аккаунт, чтобы получить сохранённую папку
+    if let Ok(account) = db.accounts().get_by_email(email_addr).await {
+        provider_config.echat_folder = account.echat_folder;
+    }
+    
     let email_client = email::EmailClient::connect(provider_config).await?;
     let email_adapter = EmailAdapter::new(email_client);
 
@@ -67,6 +72,5 @@ pub async fn build_app_state(
     // 4. AppState
     let state = AppState::new(email_adapter, storage_adapter, keystore, config);
 
-    tracing::info!("AppState готов");
     Ok(state)
 }

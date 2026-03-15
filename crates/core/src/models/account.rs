@@ -21,6 +21,7 @@ pub struct Account {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
+    Gmail,
     MailRu,
     Yandex,
 }
@@ -28,6 +29,7 @@ pub enum Provider {
 impl std::fmt::Display for Provider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Provider::Gmail => write!(f, "Gmail"),
             Provider::MailRu => write!(f, "Mail.ru"),
             Provider::Yandex => write!(f, "Яндекс"),
         }

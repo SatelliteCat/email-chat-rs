@@ -59,11 +59,20 @@ pub enum AppEvent {
     OpenChatWith {
         contact_id: Uuid,
     },
+    /// Беседа создана, нужно открыть чат
+    ChatCreated {
+        conv_id: Uuid,
+        contact_id: Uuid,
+    },
     DeleteContact {
         contact_id: Uuid,
     },
     ContactDeleted {
         contact_id: Uuid,
+    },
+    ContactActivated {
+        contact_id: Uuid,
+        email: String,
     },
 
     // ── Беседы ────────────────────────────────────────────────────────────
@@ -127,11 +136,11 @@ impl AsyncRuntime {
         self.ctx = Some(ctx);
     }
 
-    pub fn spawn<F>(&self, task: F)
+    pub fn spawn<F>(&self, task: F) -> tokio::task::JoinHandle<()>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
-        self.rt.spawn(task);
+        self.rt.spawn(task)
     }
 
     pub fn event_sender(&self) -> EventSender {
@@ -186,6 +195,9 @@ pub fn subscribe_to_core_events(
                 }
                 Ok(ChatEvent::SyncError { message }) => {
                     sender.send(AppEvent::SyncError(message));
+                }
+                Ok(ChatEvent::ContactActivated { contact_id, email }) => {
+                    sender.send(AppEvent::ContactActivated { contact_id, email });
                 }
                 Ok(_) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {

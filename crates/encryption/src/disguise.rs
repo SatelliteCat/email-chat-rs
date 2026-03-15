@@ -111,8 +111,18 @@ pub fn is_echat_message(headers: &[(&str, &str)], body: Option<&str>) -> bool {
 
     // Медленный путь: magic bytes в теле (для клиентов которые удаляют заголовки)
     if let Some(body_text) = body {
-        let first_line = body_text.trim().lines().next().unwrap_or("");
-        return crate::cipher::EncryptedPayload::has_magic_prefix(first_line);
+        // Удаляем переносы строк — base64 может быть разбит на несколько строк
+        let body_single_line: String = body_text.chars().filter(|c| !c.is_whitespace()).collect();
+
+        // Проверяем на EncryptedPayload
+        if crate::cipher::EncryptedPayload::has_magic_prefix(&body_single_line) {
+            return true;
+        }
+
+        // Проверяем на HandshakeMessage (пробуем декодировать base64)
+        if crate::handshake::HandshakeMessage::from_base64(&body_single_line).is_ok() {
+            return true;
+        }
     }
 
     false
@@ -121,12 +131,14 @@ pub fn is_echat_message(headers: &[(&str, &str)], body: Option<&str>) -> bool {
 /// Извлекает base64-блоб из тела письма.
 ///
 /// Для Invite-писем пропускает текстовую часть и находит блоб после "---".
+/// Удаляет все переносы строк — base64 может быть разбит на несколько строк.
 pub fn extract_payload(body: &str) -> &str {
     // Ищем разделитель приглашения
     if let Some(pos) = body.find("\n---\n") {
         return body[pos + 5..].trim();
     }
-    // Иначе всё тело — это payload
+    // Иначе всё тело — это payload, но нужно удалить переносы строк
+    // Возвращаем оригинальную строку — caller должен сам удалить whitespace
     body.trim()
 }
 
@@ -147,10 +159,12 @@ mod tests {
         let email = build_email("dGVzdA==", BodyKind::EncryptedMessage);
         assert!(!email.subject.is_empty());
         assert_eq!(email.body, "dGVzdA==");
-        assert!(email
-            .extra_headers
-            .iter()
-            .any(|(k, v)| k == "X-EChat" && v == "1"));
+        assert!(
+            email
+                .extra_headers
+                .iter()
+                .any(|(k, v)| k == "X-EChat" && v == "1")
+        );
     }
 
     #[test]

@@ -65,6 +65,21 @@ impl ChatService {
         let account = self.storage.get_account(account_id).await?;
         let contact = self.storage.get_contact(contact_id).await?;
 
+        // Логирование для отладки
+        tracing::info!(
+            "send_message: contact={}, status={:?}, has_keys={}",
+            contact.email,
+            contact.status,
+            contact.public_keys.is_some()
+        );
+        if let Some(ref keys) = contact.public_keys {
+            tracing::info!(
+                "  x25519: {:x?}..., ed25519: {:x?}...",
+                &keys.x25519[..4],
+                &keys.ed25519[..4]
+            );
+        }
+
         // Находим или создаём беседу
         let conv = self
             .get_or_create_direct_conversation(account_id, contact_id)
@@ -77,6 +92,7 @@ impl ChatService {
         let (status, imap_uid, imap_folder) = match &contact.public_keys {
             None => {
                 // Контакт без приложения — ставим в очередь и отправляем invite
+                tracing::warn!("contact.public_keys = None, отправляем invite");
                 self.send_invite(&account.email, &contact.email, &body)
                     .await?;
                 (MessageStatus::Queued, None, None)
@@ -165,6 +181,27 @@ impl ChatService {
     /// Помечает беседу как прочитанную.
     pub async fn mark_read(&self, conv_id: Uuid) -> Result<()> {
         self.storage.mark_conversation_read(conv_id).await
+    }
+
+    /// Создаёт или возвращает существующую direct-беседу.
+    pub async fn get_or_create_direct_conversation(
+        &self,
+        account_id: Uuid,
+        contact_id: Uuid,
+    ) -> Result<Conversation> {
+        if let Some(conv) = self
+            .storage
+            .find_direct_conversation(account_id, contact_id)
+            .await?
+        {
+            return Ok(conv);
+        }
+
+        let conv_id = Uuid::new_v4();
+        self.storage
+            .create_direct_conversation(conv_id, account_id, contact_id)
+            .await?;
+        self.storage.get_conversation(conv_id).await
     }
 
     // ── Удаление ─────────────────────────────────────────────────────────────
@@ -288,26 +325,6 @@ impl ChatService {
     }
 
     // ── Внутренние методы ─────────────────────────────────────────────────────
-
-    async fn get_or_create_direct_conversation(
-        &self,
-        account_id: Uuid,
-        contact_id: Uuid,
-    ) -> Result<Conversation> {
-        if let Some(conv) = self
-            .storage
-            .find_direct_conversation(account_id, contact_id)
-            .await?
-        {
-            return Ok(conv);
-        }
-
-        let conv_id = Uuid::new_v4();
-        self.storage
-            .create_direct_conversation(conv_id, account_id, contact_id)
-            .await?;
-        self.storage.get_conversation(conv_id).await
-    }
 
     /// Шифрует сообщение для direct-чата.
     async fn encrypt_direct(

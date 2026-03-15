@@ -177,6 +177,58 @@ impl ImapConnection {
         Ok(())
     }
 
+    /// Перемещает письма из одной папки в другую.
+    pub async fn move_messages(
+        &self,
+        from_folder: &str,
+        to_folder: &str,
+        uids: &[MessageUid],
+    ) -> Result<()> {
+        if uids.is_empty() {
+            return Ok(());
+        }
+
+        let mut guard = self.inner.lock().await;
+        let session = self
+            .get_or_reconnect(&mut guard, &self.config.clone())
+            .await?;
+
+        // Выбираем исходную папку
+        session
+            .select(from_folder)
+            .await
+            .map_err(|e| Error::Imap(e.to_string()))?;
+
+        // Формируем UID SET
+        let uid_set: Vec<String> = uids.iter().map(|u| u.0.to_string()).collect();
+        let uid_set_str = uid_set.join(",");
+
+        // Копируем письма в целевую папку
+        let _ = session
+            .uid_copy(&uid_set_str, to_folder)
+            .await
+            .map_err(|e| Error::Imap(e.to_string()))?;
+
+        // Удаляем из исходной папки
+        let _ = session
+            .uid_store(&uid_set_str, "+FLAGS (\\Deleted)")
+            .await
+            .map_err(|e| Error::Imap(e.to_string()))?;
+
+        let _ = session
+            .expunge()
+            .await
+            .map_err(|e| Error::Imap(e.to_string()))?;
+
+        info!(
+            "Перемещено {} писем из {} в {}",
+            uids.len(),
+            from_folder,
+            to_folder
+        );
+        Ok(())
+    }
+
     /// Создаёт папку если она не существует.
     pub async fn ensure_folder(&self, folder: &str) -> Result<()> {
         let mut guard = self.inner.lock().await;
@@ -197,6 +249,23 @@ impl ImapConnection {
                 Ok(())
             }
         }
+    }
+
+    /// Сохраняет письмо в указанную папку через IMAP APPEND.
+    pub async fn append_message(&self, folder: &str, email_bytes: &[u8]) -> Result<()> {
+        let mut guard = self.inner.lock().await;
+        let session = self
+            .get_or_reconnect(&mut guard, &self.config.clone())
+            .await?;
+
+        // Выполняем APPEND
+        session
+            .append(folder, email_bytes)
+            .await
+            .map_err(|e| Error::Imap(e.to_string()))?;
+
+        info!("Письмо сохранено в папку {}", folder);
+        Ok(())
     }
 
     // ── Внутренние методы ─────────────────────────────────────────────────────
@@ -312,9 +381,10 @@ fn parse_imap_message(msg: &async_imap::types::Fetch, folder: &str) -> Result<In
 
     let (headers, from, to, subject) = parse_headers(header_str)?;
 
-    // Тело письма
+    // Тело письма — используем mail-parser для корректного декодирования
+    // Content-Transfer-Encoding (base64, quoted-printable)
     let body_bytes = msg.text().unwrap_or(b"");
-    let body = std::str::from_utf8(body_bytes).unwrap_or("").to_string();
+    let body = decode_body(body_bytes, header_str);
 
     // Дата
     let date = msg
@@ -334,33 +404,60 @@ fn parse_imap_message(msg: &async_imap::types::Fetch, folder: &str) -> Result<In
     })
 }
 
-/// Разбирает строку заголовков RFC 2822.
-fn parse_headers(raw: &str) -> Result<(RawEmailHeaders, String, Vec<String>, String)> {
-    let mut headers = RawEmailHeaders::default();
-    let mut from = String::new();
-    let mut to = Vec::new();
-    let mut subject = String::new();
+/// Декодирует тело письма с учётом Content-Transfer-Encoding.
+fn decode_body(body_bytes: &[u8], headers_str: &str) -> String {
+    // Пробуем распарсить полное письмо для доступа к MIME-частям
+    let full_message = [headers_str.as_bytes(), b"\r\n\r\n", body_bytes].concat();
+    let parser = mail_parser::MessageParser::default();
 
-    for line in raw.lines() {
-        if line.is_empty() {
-            break;
-        }
-        if let Some((name, value)) = line.split_once(':') {
-            let name = name.trim().to_string();
-            let value = value.trim().to_string();
-
-            match name.to_lowercase().as_str() {
-                "from" => from = extract_email_address(&value),
-                "to" | "cc" => {
-                    to.extend(value.split(',').map(|s| extract_email_address(s.trim())));
-                }
-                "subject" => subject = decode_mime_header(&value),
-                _ => {}
-            }
-
-            headers.0.push((name, value));
+    if let Some(parsed) = parser.parse(&full_message[..]) {
+        // Пытаемся получить текстовую часть с автоматическим декодированием
+        if let Some(body_text) = parsed.body_text(0) {
+            return body_text.to_string();
         }
     }
+
+    // Fallback: возвращаем тело как есть, удаляя переносы строк
+    // (для base64 это нормально)
+    String::from_utf8_lossy(body_bytes).to_string()
+}
+
+/// Разбирает строку заголовков RFC 2822.
+fn parse_headers(raw: &str) -> Result<(RawEmailHeaders, String, Vec<String>, String)> {
+    // Используем mail-parser для надёжного парсинга заголовков
+    let parser = mail_parser::MessageParser::default();
+    let parsed = parser
+        .parse(raw.as_bytes())
+        .ok_or_else(|| Error::Parse("mail-parser: не удалось распарсить письмо".into()))?;
+
+    let mut headers = RawEmailHeaders::default();
+
+    // Извлекаем все заголовки
+    for header in parsed.headers() {
+        let name = header.name.to_string();
+        let value = header.value.as_text().unwrap_or("").to_string();
+        headers.0.push((name, value));
+    }
+
+    // Извлекаем From
+    let from = parsed
+        .from()
+        .and_then(|m| m.first())
+        .and_then(|m| m.address().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    // Извлекаем To
+    let mut to = Vec::new();
+    if let Some(to_list) = parsed.to() {
+        for mailbox in to_list.iter() {
+            if let Some(addr) = mailbox.address() {
+                to.push(addr.to_string());
+            }
+        }
+    }
+
+    // Извлекаем Subject
+    let subject = parsed.subject().unwrap_or("").to_string();
 
     Ok((headers, from, to, subject))
 }

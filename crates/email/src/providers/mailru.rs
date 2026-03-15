@@ -34,6 +34,6 @@ pub fn config(email: String, app_password: String) -> ProviderConfig {
             port: 465,
             tls: TlsMode::Tls,
         },
-        echat_folder: "EChat".to_string(),
+        echat_folder: "INBOX".to_string(),
     }
 }

@@ -59,7 +59,7 @@ impl HandshakeMessage {
     pub fn new_init(keypair: &IdentityKeypair, from_email: &str) -> Self {
         let timestamp_secs = current_timestamp();
         let public_keys = keypair.public_keys();
-        let signature = sign_handshake(keypair, &public_keys, timestamp_secs);
+        let signature = sign_handshake(keypair, &public_keys, timestamp_secs, from_email);
 
         Self {
             version: 1,
@@ -75,7 +75,7 @@ impl HandshakeMessage {
     pub fn new_ack(keypair: &IdentityKeypair, from_email: &str) -> Self {
         let timestamp_secs = current_timestamp();
         let public_keys = keypair.public_keys();
-        let signature = sign_handshake(keypair, &public_keys, timestamp_secs);
+        let signature = sign_handshake(keypair, &public_keys, timestamp_secs, from_email);
 
         Self {
             version: 1,
@@ -87,10 +87,15 @@ impl HandshakeMessage {
         }
     }
 
-    /// Проверяет подпись и актуальность timestamp.
+    /// Проверяет подпись, email отправителя и актуальность timestamp.
     ///
     /// `max_age_secs` — максимальный допустимый возраст сообщения (обычно 3600 секунд).
-    pub fn verify(&self, max_age_secs: u64) -> Result<()> {
+    pub fn verify(&self, expected_from_email: &str, max_age_secs: u64) -> Result<()> {
+        // Проверяем, что email в сообщении совпадает с ожидаемым
+        if self.from_email != expected_from_email {
+            return Err(Error::InvalidSignature);
+        }
+        
         // Проверяем актуальность
         let now = current_timestamp();
         let age = now.saturating_sub(self.timestamp_secs);
@@ -99,7 +104,7 @@ impl HandshakeMessage {
         }
 
         // Проверяем подпись
-        let data = signing_data(&self.public_keys, self.timestamp_secs);
+        let data = signing_data(&self.public_keys, self.timestamp_secs, &self.from_email);
         IdentityKeypair::verify(&self.public_keys.ed25519, &data, &self.signature)
     }
 
@@ -113,8 +118,9 @@ impl HandshakeMessage {
     /// Декодирует из base64.
     pub fn from_base64(s: &str) -> Result<Self> {
         use base64::{Engine, engine::general_purpose::STANDARD};
+        let sanitized: String = s.chars().filter(|c| !c.is_whitespace()).collect();
         let bytes = STANDARD
-            .decode(s.trim())
+            .decode(&sanitized)
             .map_err(|_| Error::InvalidPublicKey("base64 decode failed".into()))?;
         serde_json::from_slice(&bytes).map_err(Error::Serialization)
     }
@@ -133,11 +139,12 @@ pub enum HandshakeState {
 
 // ── Внутренние утилиты ────────────────────────────────────────────────────────
 
-fn signing_data(public_keys: &PublicKeys, timestamp_secs: u64) -> Vec<u8> {
+fn signing_data(public_keys: &PublicKeys, timestamp_secs: u64, from_email: &str) -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(&public_keys.x25519);
     data.extend_from_slice(&public_keys.ed25519);
     data.extend_from_slice(&timestamp_secs.to_le_bytes());
+    data.extend_from_slice(from_email.as_bytes());
     data
 }
 
@@ -145,8 +152,9 @@ fn sign_handshake(
     keypair: &IdentityKeypair,
     public_keys: &PublicKeys,
     timestamp_secs: u64,
+    from_email: &str,
 ) -> [u8; 64] {
-    let data = signing_data(public_keys, timestamp_secs);
+    let data = signing_data(public_keys, timestamp_secs, from_email);
     keypair.sign(&data)
 }
 
@@ -166,7 +174,7 @@ mod tests {
     fn test_init_verify() {
         let alice = IdentityKeypair::generate();
         let msg = HandshakeMessage::new_init(&alice, "alice@mail.ru");
-        assert!(msg.verify(3600).is_ok());
+        assert!(msg.verify("alice@mail.ru", 3600).is_ok());
     }
 
     #[test]
@@ -177,7 +185,7 @@ mod tests {
         // Портим публичный ключ
         msg.public_keys.x25519[0] ^= 0xFF;
 
-        assert!(msg.verify(3600).is_err());
+        assert!(msg.verify("alice@mail.ru", 3600).is_err());
     }
 
     #[test]

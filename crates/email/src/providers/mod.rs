@@ -3,6 +3,7 @@
 //! Каждый провайдер — это набор параметров подключения:
 //! IMAP хост/порт, SMTP хост/порт, специфические quirks.
 
+pub mod gmail;
 pub mod mailru;
 pub mod yandex;
 
@@ -36,6 +37,7 @@ pub enum TlsMode {
 /// Поддерживаемые провайдеры.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Provider {
+    Gmail,
     MailRu,
     Yandex,
 }
@@ -43,6 +45,7 @@ pub enum Provider {
 impl std::fmt::Display for Provider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Provider::Gmail => write!(f, "Gmail"),
             Provider::MailRu => write!(f, "Mail.ru"),
             Provider::Yandex => write!(f, "Яндекс"),
         }
@@ -67,6 +70,11 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
+    /// Создаёт конфигурацию для Gmail.
+    pub fn gmail(email: impl Into<String>, app_password: impl Into<String>) -> Self {
+        gmail::config(email.into(), app_password.into())
+    }
+
     /// Создаёт конфигурацию для Mail.ru.
     pub fn mailru(email: impl Into<String>, app_password: impl Into<String>) -> Self {
         mailru::config(email.into(), app_password.into())
@@ -84,11 +92,9 @@ impl ProviderConfig {
         let domain = email.split('@').nth(1)?;
 
         match domain {
-            "mail.ru" | "inbox.ru" | "list.ru" | "bk.ru" => {
-                Some(Self::mailru(email, password))
-            }
-            "yandex.ru" | "ya.ru" | "yandex.com" | "yandex.kz"
-            | "yandex.by" | "yandex.ua" => {
+            "gmail.com" | "googlemail.com" => Some(Self::gmail(email, password)),
+            "mail.ru" | "inbox.ru" | "list.ru" | "bk.ru" => Some(Self::mailru(email, password)),
+            "yandex.ru" | "ya.ru" | "yandex.com" | "yandex.kz" | "yandex.by" | "yandex.ua" => {
                 Some(Self::yandex(email, password))
             }
             _ => None,
