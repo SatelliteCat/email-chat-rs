@@ -15,7 +15,7 @@ use crate::{
     },
     ports::{
         email::{DynEmailTransport, OutgoingEmail},
-        storage::{CreateMessage, DynStorage},
+        storage::{ConversationKeys, CreateMessage, DynStorage},
     },
     services::account::AccountService,
 };
@@ -88,38 +88,108 @@ impl ChatService {
         let msg_id = Uuid::new_v4();
         let sent_at = Utc::now();
 
+        // Получаем ключи диалога И контакта (fallback)
+        let conv_keys = self.storage.get_conversation_keys(conv.id).await.ok();
+        let contact = self.storage.get_contact(contact_id).await?;
+
         // Определяем статус и пробуем отправить
-        let (status, imap_uid, imap_folder) = match &contact.public_keys {
-            None => {
-                // Контакт без приложения — ставим в очередь и отправляем invite
-                tracing::warn!("contact.public_keys = None, отправляем invite");
-                self.send_invite(&account.email, &contact.email, &body)
-                    .await?;
-                (MessageStatus::Queued, None, None)
-            }
-            Some(their_keys) => {
-                // Контакт активен — шифруем и отправляем
-                let ciphertext = self
-                    .encrypt_direct(
-                        account_id, their_keys, conv.id, msg_id, &body, reply_to, &sent_at,
+        let (status, imap_uid, imap_folder, error_message) = if let Some(keys) = &conv_keys {
+            // Есть ключи диалога
+            match (&keys.my_keypair_json, &keys.their_public_key_json) {
+                (Some(_), None) => {
+                    // Ключи диалога созданы, но публичный ключ собеседника ещё не установлен
+                    // Ставим в очередь и отправляем invite
+                    tracing::warn!("their_public_key_json = None, отправляем invite");
+                    self.send_invite(&account.email, &contact.email, &body)
+                        .await?;
+                    (MessageStatus::Queued, None, None, None)
+                }
+                (Some(my_keys_json), Some(their_key_json)) => {
+                    // Ключи диалога активны — шифруем и отправляем
+                    tracing::info!("Ключи диалога активны, шифруем сообщение...");
+                    
+                    let their_keys: encryption::keypair::PublicKeys =
+                        serde_json::from_str(their_key_json)
+                            .map_err(|e| Error::Internal(e.to_string()))?;
+
+                    let ciphertext = self
+                        .encrypt_direct_with_keys(
+                            my_keys_json,
+                            &their_keys,
+                            conv.id,
+                            msg_id,
+                            &body,
+                            reply_to,
+                            &sent_at,
+                            account_id,
+                        )
+                        .await?;
+
+                    tracing::info!("Сообщение зашифровано, размер: {} байт", ciphertext.len());
+
+                    // Убеждаемся что папка EChat существует
+                    tracing::info!("Проверяем/создаём папку EChat на сервере...");
+                    match self.email.ensure_echat_folder().await {
+                        Ok(()) => tracing::info!("Папка EChat готова"),
+                        Err(e) => tracing::warn!("Не удалось создать папку EChat: {}", e),
+                    }
+
+                    tracing::info!("Отправляем письмо через SMTP: {} → {}", account.email, contact.email);
+
+                    // Отправляем через SMTP
+                    match self
+                        .email
+                        .send(OutgoingEmail {
+                            from: account.email.clone(),
+                            to: vec![contact.email.clone()],
+                            subject: encryption::disguise::random_subject(),
+                            body: ciphertext,
+                            extra_headers: vec![("X-EChat".into(), "1".into())],
+                        })
+                        .await
+                    {
+                        Ok(()) => {
+                            tracing::info!("Письмо успешно отправлено через SMTP");
+                            (MessageStatus::Sent, None, None, None)
+                        }
+                        Err(e) => {
+                            tracing::error!("Ошибка SMTP: {}", e);
+                            (MessageStatus::Failed, None, None, Some(e.to_string()))
+                        }
+                    }
+                }
+                _ => {
+                    // Ключи диалога не полные — пробуем fallback на ключи контакта
+                    tracing::warn!("Ключи диалога не полные, используем ключи контакта");
+                    self.send_with_contact_keys(
+                        account_id,
+                        &account,
+                        &contact,
+                        conv.id,
+                        msg_id,
+                        body.clone(),
+                        reply_to,
+                        sent_at,
                     )
-                    .await?;
-
-                self.email
-                    .send(OutgoingEmail {
-                        from: account.email.clone(),
-                        to: vec![contact.email.clone()],
-                        subject: encryption::disguise::random_subject(),
-                        body: ciphertext,
-                        extra_headers: vec![("X-EChat".into(), "1".into())],
-                    })
-                    .await?;
-
-                (MessageStatus::Sent, None, None)
+                    .await?
+                }
             }
+        } else {
+            // Ключей диалога нет — используем старый механизм с ключами контакта
+            self.send_with_contact_keys(
+                account_id,
+                &account,
+                &contact,
+                conv.id,
+                msg_id,
+                body.clone(),
+                reply_to,
+                sent_at,
+            )
+            .await?
         };
 
-        // Сохраняем в БД
+        // Сохраняем в БД (всегда, даже если ошибка отправки)
         self.storage
             .create_message(CreateMessage {
                 id: msg_id,
@@ -133,6 +203,7 @@ impl ChatService {
                 imap_uid: imap_uid.clone(),
                 imap_folder: imap_folder.clone(),
                 sent_at,
+                error_message: error_message.clone(),
             })
             .await?;
 
@@ -157,6 +228,62 @@ impl ChatService {
         };
 
         Ok(message)
+    }
+
+    /// Отправляет сообщение используя ключи контакта (fallback механизм).
+    async fn send_with_contact_keys(
+        &self,
+        account_id: Uuid,
+        account: &crate::models::account::Account,
+        contact: &crate::models::contact::Contact,
+        conv_id: Uuid,
+        msg_id: Uuid,
+        body: String,
+        reply_to: Option<Uuid>,
+        sent_at: chrono::DateTime<Utc>,
+    ) -> Result<(MessageStatus, Option<u32>, Option<String>, Option<String>)> {
+        // Проверяем есть ли у контакта публичные ключи
+        match &contact.public_keys {
+            None => {
+                // Контакт без приложения — отправляем invite
+                tracing::warn!("contact.public_keys = None, отправляем invite");
+                self.send_invite(&account.email, &contact.email, &body)
+                    .await?;
+                Ok((MessageStatus::Queued, None, None, None))
+            }
+            Some(their_keys) => {
+                // Контакт активен — шифруем и отправляем
+                let ciphertext = self
+                    .encrypt_direct(
+                        account_id, their_keys, conv_id, msg_id, &body, reply_to, &sent_at,
+                    )
+                    .await?;
+
+                // Убеждаемся что папка EChat существует
+                self.email.ensure_echat_folder().await.unwrap_or_else(|e| {
+                    tracing::warn!("Не удалось создать папку EChat: {}", e);
+                });
+
+                // Отправляем через SMTP
+                match self
+                    .email
+                    .send(OutgoingEmail {
+                        from: account.email.clone(),
+                        to: vec![contact.email.clone()],
+                        subject: encryption::disguise::random_subject(),
+                        body: ciphertext,
+                        extra_headers: vec![("X-EChat".into(), "1".into())],
+                    })
+                    .await
+                {
+                    Ok(()) => Ok((MessageStatus::Sent, None, None, None)),
+                    Err(e) => {
+                        tracing::error!("Ошибка SMTP: {}", e);
+                        Ok((MessageStatus::Failed, None, None, Some(e.to_string())))
+                    }
+                }
+            }
+        }
     }
 
     // ── История ──────────────────────────────────────────────────────────────
@@ -184,6 +311,8 @@ impl ChatService {
     }
 
     /// Создаёт или возвращает существующую direct-беседу.
+    ///
+    /// При создании беседы генерирует пару ключей для этого диалога.
     pub async fn get_or_create_direct_conversation(
         &self,
         account_id: Uuid,
@@ -201,7 +330,60 @@ impl ChatService {
         self.storage
             .create_direct_conversation(conv_id, account_id, contact_id)
             .await?;
+
+        // Генерируем пару ключей для этого диалога
+        let keypair = encryption::keypair::IdentityKeypair::generate();
+        let public_keys = keypair.public_keys();
+        let keys_json =
+            serde_json::to_string(&public_keys).map_err(|e| Error::Internal(e.to_string()))?;
+
+        self.storage
+            .create_conversation_keys(conv_id, keys_json)
+            .await?;
+
         self.storage.get_conversation(conv_id).await
+    }
+
+    // ── Ключи диалогов ───────────────────────────────────────────────────────
+
+    /// Возвращает ключи диалога.
+    pub async fn get_conversation_keys(&self, conv_id: Uuid) -> Result<ConversationKeys> {
+        self.storage.get_conversation_keys(conv_id).await
+    }
+
+    /// Возвращает беседу по ID.
+    pub async fn get_conversation(&self, conv_id: Uuid) -> Result<Conversation> {
+        self.storage.get_conversation(conv_id).await
+    }
+
+    /// Устанавливает публичный ключ собеседника для диалога.
+    pub async fn set_their_public_key(
+        &self,
+        conv_id: Uuid,
+        their_public_key_json: String,
+    ) -> Result<()> {
+        // Сохраняем ключ в conversation_keys
+        self.storage
+            .set_conversation_their_public_key(conv_id, their_public_key_json.clone())
+            .await?;
+
+        // Получаем беседу чтобы найти contact_id
+        let conv = self.storage.get_conversation(conv_id).await?;
+        
+        // Если это direct беседа, обновляем статус контакта
+        if let crate::models::conversation::ConversationKind::Direct { contact_id } = conv.kind {
+            // Обновляем статус контакта на HasKey и сохраняем публичный ключ
+            self.storage
+                .complete_contact_handshake(contact_id, their_public_key_json)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Проверяет, активны ли ключи диалога (оба ключа установлены).
+    pub async fn are_keys_active(&self, conv_id: Uuid) -> Result<bool> {
+        self.storage.are_conversation_keys_active(conv_id).await
     }
 
     // ── Удаление ─────────────────────────────────────────────────────────────
@@ -294,6 +476,7 @@ impl ChatService {
                 imap_uid: Some(imap_uid),
                 imap_folder: Some(imap_folder),
                 sent_at,
+                error_message: None,
             })
             .await?;
 
@@ -325,6 +508,51 @@ impl ChatService {
     }
 
     // ── Внутренние методы ─────────────────────────────────────────────────────
+
+    /// Шифрует сообщение для direct-чата используя ключи диалога.
+    ///
+    /// NOTE: Сейчас использует ключи аккаунта для шифрования.
+    /// Ключи диалога хранятся только для отображения пользователю (копировать/вставить).
+    async fn encrypt_direct_with_keys(
+        &self,
+        _my_keypair_json: &str,
+        their_keys: &encryption::keypair::PublicKeys,
+        conv_id: Uuid,
+        msg_id: Uuid,
+        body: &str,
+        reply_to: Option<Uuid>,
+        sent_at: &chrono::DateTime<Utc>,
+        account_id: Uuid,
+    ) -> Result<String> {
+        // Используем ключи аккаунта для шифрования
+        // Ключи диалога — только для UI (копировать/вставить публичный ключ)
+        let keypair = self.account_svc.load_or_create_keypair(account_id).await?;
+
+        let shared_secret = encryption::session::derive_from_bytes(
+            keypair.secret_key(),
+            &their_keys.x25519,
+            "direct-chat",
+        )
+        .map_err(|e| Error::Encryption(e.to_string()))?;
+
+        // Формируем ChatEnvelope (содержимое до шифрования)
+        let envelope = serde_json::json!({
+            "msg_id": msg_id,
+            "conv_id": conv_id,
+            "kind": "text",
+            "sent_at": sent_at.to_rfc3339(),
+            "body": body,
+            "reply_to": reply_to,
+            "protocol_version": 1,
+        });
+        let envelope_bytes =
+            serde_json::to_vec(&envelope).map_err(|e| Error::Internal(e.to_string()))?;
+
+        let payload = encryption::cipher::encrypt(&envelope_bytes, &shared_secret)
+            .map_err(|e| Error::Encryption(e.to_string()))?;
+
+        Ok(payload.to_base64())
+    }
 
     /// Шифрует сообщение для direct-чата.
     async fn encrypt_direct(

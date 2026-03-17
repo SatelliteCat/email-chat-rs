@@ -176,6 +176,12 @@ pub struct ChatUiState {
     pub loaded_conv_id: Option<Uuid>,
     /// Загрузка истории в процессе
     pub is_loading_history: bool,
+    /// Публичный ключ нашего аккаунта для этого диалога (для копирования)
+    pub my_public_key: String,
+    /// Поле для вставки публичного ключа собеседника
+    pub their_public_key_input: String,
+    /// Сообщение о статусе ключей
+    pub keys_status_message: Option<String>,
 }
 
 impl Default for ChatUiState {
@@ -186,6 +192,9 @@ impl Default for ChatUiState {
             scroll_to_bottom: false,
             loaded_conv_id: None,
             is_loading_history: false,
+            my_public_key: String::new(),
+            their_public_key_input: String::new(),
+            keys_status_message: None,
         }
     }
 }

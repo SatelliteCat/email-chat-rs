@@ -115,6 +115,9 @@ impl EmailClient {
         // Отправляем через SMTP и получаем сырые байты
         let email_bytes = self.smtp.send(&msg, &self.config).await?;
 
+        // Убеждаемся что папка существует перед сохранением
+        self.ensure_echat_folder().await?;
+
         // Сохраняем копию в папку EChat через IMAP APPEND
         self.imap
             .append_message(&self.config.echat_folder, &email_bytes)

@@ -173,6 +173,8 @@ pub struct MessageRow {
     pub sent_at: String,
     #[sqlx(default)]
     pub received_at: Option<String>,
+    #[sqlx(default)]
+    pub error_message: Option<String>,
     pub created_at: String,
 }
 
@@ -190,6 +192,7 @@ pub struct NewMessage {
     pub imap_uid: Option<u32>,
     pub imap_folder: Option<String>,
     pub sent_at: DateTime<Utc>,
+    pub error_message: Option<String>,
 }
 
 /// Запись UID для удаления с IMAP сервера.
@@ -199,6 +202,63 @@ pub struct ImapUidRecord {
     pub imap_uid: Option<i64>,
     #[sqlx(default)]
     pub imap_folder: Option<String>,
+}
+
+// ── Conversation Keys ─────────────────────────────────────────────────────────
+
+/// Строка таблицы `conversation_keys`.
+#[derive(Debug, Clone, sqlx::FromRow, Default)]
+pub struct ConversationKeyRow {
+    pub conversation_id: String,
+    #[sqlx(default)]
+    pub my_keypair_json: Option<String>,
+    #[sqlx(default)]
+    pub their_public_key_json: Option<String>,
+    #[sqlx(default)]
+    pub status: String,
+    #[sqlx(default)]
+    pub created_at: String,
+    #[sqlx(default)]
+    pub updated_at: String,
+}
+
+/// Для создания записи ключей диалога.
+#[derive(Debug, Clone)]
+pub struct NewConversationKeys {
+    pub conversation_id: Uuid,
+    pub my_keypair_json: String,
+}
+
+/// Для обновления ключей диалога.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateConversationKeys {
+    pub my_keypair_json: Option<String>,
+    pub their_public_key_json: Option<String>,
+    pub status: Option<ConversationKeyStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConversationKeyStatus {
+    Incomplete,
+    Active,
+}
+
+impl ConversationKeyStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ConversationKeyStatus::Incomplete => "incomplete",
+            ConversationKeyStatus::Active => "active",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "incomplete" => Some(ConversationKeyStatus::Incomplete),
+            "active" => Some(ConversationKeyStatus::Active),
+            _ => None,
+        }
+    }
 }
 
 // ── Перечисления ──────────────────────────────────────────────────────────────
@@ -233,25 +293,24 @@ impl Provider {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContactStatus {
-    Unregistered,
-    Pending,
-    Active,
+    /// Публичного ключа нет
+    NoKey,
+    /// Публичный ключ сохранён
+    HasKey,
 }
 
 impl ContactStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ContactStatus::Unregistered => "unregistered",
-            ContactStatus::Pending => "pending",
-            ContactStatus::Active => "active",
+            ContactStatus::NoKey => "nokey",
+            ContactStatus::HasKey => "haskey",
         }
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "unregistered" => Some(ContactStatus::Unregistered),
-            "pending" => Some(ContactStatus::Pending),
-            "active" => Some(ContactStatus::Active),
+            "nokey" => Some(ContactStatus::NoKey),
+            "haskey" => Some(ContactStatus::HasKey),
             _ => None,
         }
     }
@@ -301,6 +360,7 @@ pub enum MessageStatus {
     Sent,
     Delivered,
     Read,
+    Failed,
 }
 
 impl MessageStatus {
@@ -311,6 +371,7 @@ impl MessageStatus {
             MessageStatus::Sent => "sent",
             MessageStatus::Delivered => "delivered",
             MessageStatus::Read => "read",
+            MessageStatus::Failed => "failed",
         }
     }
 }

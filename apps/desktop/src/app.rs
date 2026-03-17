@@ -209,6 +209,51 @@ impl EchatApp {
                 self.load_contacts();
             }
 
+            // ── Ключи диалогов ────────────────────────────────────────────
+            AppEvent::LoadConversationKeys { conv_id } => {
+                self.spawn_load_conversation_keys(conv_id);
+            }
+
+            AppEvent::SetTheirPublicKey {
+                conv_id,
+                public_key_json,
+            } => {
+                self.spawn_set_their_public_key(conv_id, public_key_json);
+            }
+
+            AppEvent::ConversationKeysLoaded {
+                conv_id,
+                my_public_key,
+                their_public_key,
+                is_active,
+            } => {
+                if self.ui.selected_conv_id == Some(conv_id) {
+                    self.ui.chat.my_public_key = my_public_key;
+                    if let Some(key) = their_public_key {
+                        self.ui.chat.their_public_key_input = key;
+                    }
+                    self.ui.chat.keys_status_message = Some(if is_active {
+                        "✅ Ключи активны — сообщения шифруются".to_string()
+                    } else {
+                        "⚠️ Ключ собеседника не установлен — сообщения не зашифрованы".to_string()
+                    });
+                }
+            }
+
+            AppEvent::TheirPublicKeySet { conv_id } => {
+                if self.ui.selected_conv_id == Some(conv_id) {
+                    self.ui.chat.keys_status_message =
+                        Some("✅ Ключ собеседника сохранён — сообщения шифруются".to_string());
+                    self.ui.toast_info("Ключ собеседника сохранён");
+                }
+                // Перезагружаем ключи
+                self.spawn_load_conversation_keys(conv_id);
+            }
+
+            AppEvent::KeysError(e) => {
+                self.ui.toast_error(format!("Ошибка ключей: {}", e));
+            }
+
             // ── Синхронизация ─────────────────────────────────────────────
             AppEvent::SyncConnected(c) => {
                 self.ui.sync_connected = c;
@@ -465,6 +510,7 @@ impl EchatApp {
         }
 
         self.load_history(conv_id);
+        self.load_conversation_keys(conv_id);
     }
 
     fn load_history(&mut self, conv_id: Uuid) {
@@ -481,6 +527,30 @@ impl EchatApp {
                     messages: msgs,
                 }),
                 Err(e) => tracing::warn!("Ошибка загрузки истории: {}", e),
+            }
+        });
+    }
+
+    fn load_conversation_keys(&mut self, conv_id: Uuid) {
+        let (state, _) = match self.services() {
+            Some(x) => x,
+            None => return,
+        };
+        let sender = self.rt.event_sender();
+
+        self.rt.spawn(async move {
+            match state.chat_service.get_conversation_keys(conv_id).await {
+                Ok(keys) => {
+                    sender.send(AppEvent::ConversationKeysLoaded {
+                        conv_id,
+                        my_public_key: keys.my_keypair_json.unwrap_or_default(),
+                        their_public_key: keys.their_public_key_json,
+                        is_active: keys.is_active,
+                    });
+                }
+                Err(_) => {
+                    // Ключей ещё нет — они будут созданы при первом открытии
+                }
             }
         });
     }
@@ -620,6 +690,62 @@ impl EchatApp {
             match state.chat_service.delete_conversation(conv_id, true).await {
                 Ok(()) => sender.send(AppEvent::ConversationDeleted { conv_id }),
                 Err(e) => sender.send(AppEvent::SendError(e.to_string())),
+            }
+        });
+    }
+
+    fn spawn_load_conversation_keys(&mut self, conv_id: Uuid) {
+        let (state, account_id) = match self.services() {
+            Some(x) => x,
+            None => return,
+        };
+        let sender = self.rt.event_sender();
+
+        self.rt.spawn(async move {
+            match state.chat_service.get_conversation_keys(conv_id).await {
+                Ok(keys) => {
+                    // Извлекаем публичный ключ из my_keypair_json
+                    let my_public_key = keys.my_keypair_json.and_then(|json| {
+                        // my_keypair_json содержит PublicKeys (публичные ключи)
+                        Some(json) // Пока просто возвращаем JSON как есть
+                    });
+
+                    sender.send(AppEvent::ConversationKeysLoaded {
+                        conv_id,
+                        my_public_key: my_public_key.unwrap_or_default(),
+                        their_public_key: keys.their_public_key_json,
+                        is_active: keys.is_active,
+                    });
+                }
+                Err(e) => sender.send(AppEvent::KeysError(e.to_string())),
+            }
+        });
+    }
+
+    fn spawn_set_their_public_key(&mut self, conv_id: Uuid, public_key_json: String) {
+        let (state, account_id) = match self.services() {
+            Some(x) => x,
+            None => return,
+        };
+        let sender = self.rt.event_sender();
+
+        self.rt.spawn(async move {
+            // Сохраняем ключ (в conversation_keys и в контакт)
+            match state
+                .chat_service
+                .set_their_public_key(conv_id, public_key_json)
+                .await
+            {
+                Ok(()) => {
+                    sender.send(AppEvent::TheirPublicKeySet { conv_id });
+                    
+                    // Перезагружаем контакты чтобы обновить статус
+                    match state.contact_service.list_contacts(account_id).await {
+                        Ok(contacts) => sender.send(AppEvent::ContactsLoaded(contacts)),
+                        Err(e) => tracing::warn!("Ошибка загрузки контактов: {}", e),
+                    }
+                }
+                Err(e) => sender.send(AppEvent::KeysError(e.to_string())),
             }
         });
     }

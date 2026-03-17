@@ -7,24 +7,22 @@
 //!     │
 //!     └─ да
 //!         │
-//!         ├─ HandshakeInit  ──► ContactService::handle_handshake_init
-//!         ├─ HandshakeAck   ──► ContactService::handle_handshake_ack
-//!         └─ EncryptedMsg   ──► расшифровать → ChatService::handle_incoming
+//!         └─ EncryptedMsg ──► расшифровать → ChatService::handle_incoming
 //! ```
+//!
+//! Handshake не реализован — пользователь вручную вводит публичные ключи через UI.
 
 use uuid::Uuid;
 
 use crate::{
     Error, Result,
     ports::email::{DynEmailTransport, IncomingEmail},
-    services::{account::AccountService, chat::ChatService, contacts::ContactService},
+    services::{account::AccountService, chat::ChatService},
 };
 
 /// Тип входящего echat-письма после первичного разбора.
 #[derive(Debug)]
 enum IncomingKind {
-    HandshakeInit(encryption::keypair::PublicKeys),
-    HandshakeAck(encryption::keypair::PublicKeys),
     EncryptedMessage { payload_b64: String },
     Unknown,
 }
@@ -37,7 +35,6 @@ pub async fn process_incoming(
     account_id: Uuid,
     email_transport: &DynEmailTransport,
     account_svc: &AccountService,
-    contact_svc: &ContactService,
     chat_svc: &ChatService,
 ) -> Result<()> {
     tracing::debug!(
@@ -102,25 +99,10 @@ pub async fn process_incoming(
         raw_single_line.chars().take(100).collect::<String>()
     );
 
-    // Шаг 3: определяем тип
+    // Шаг 4: определяем тип и направляем в сервис
     let kind = detect_kind(&raw_single_line, &email.from);
 
-    // Шаг 4: направляем в нужный сервис
     match kind {
-        IncomingKind::HandshakeInit(their_keys) => {
-            tracing::info!("HandshakeInit от {}", email.from);
-            contact_svc
-                .handle_handshake_init(account_id, &email.from, &their_keys)
-                .await?;
-        }
-
-        IncomingKind::HandshakeAck(their_keys) => {
-            tracing::info!("HandshakeAck от {}", email.from);
-            contact_svc
-                .handle_handshake_ack(account_id, &email.from, &their_keys)
-                .await?;
-        }
-
         IncomingKind::EncryptedMessage { payload_b64 } => {
             // Пытаемся расшифровать
             match decrypt_message(account_id, &email.from, &payload_b64, account_svc).await {
@@ -161,47 +143,6 @@ fn detect_kind(raw: &str, from_email: &str) -> IncomingKind {
         raw.len()
     );
 
-    // Пробуем как HandshakeMessage
-    match encryption::handshake::HandshakeMessage::from_base64(raw) {
-        Ok(hs) => {
-            tracing::info!(
-                "HandshakeMessage декодирован от {}: type={:?}",
-                from_email,
-                hs.kind
-            );
-            // Увеличиваем временной допуск до 25 часов, чтобы компенсировать
-            // возможную рассинхронизацию часов у пользователей.
-            match hs.verify(from_email, 3600 * 25) {
-                Ok(()) => {
-                    tracing::info!(
-                        "Handshake подпись верна от {}: type={:?}",
-                        from_email,
-                        hs.kind
-                    );
-                    return match hs.kind {
-                        encryption::handshake::HandshakeKind::Init => {
-                            IncomingKind::HandshakeInit(hs.public_keys)
-                        }
-                        encryption::handshake::HandshakeKind::Ack => {
-                            IncomingKind::HandshakeAck(hs.public_keys)
-                        }
-                    };
-                }
-                Err(e) => {
-                    tracing::warn!("Handshake подпись не верна для {}: {:?}", from_email, e);
-                }
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                "Не HandshakeMessage от {}: {:?}. Первые 100 символов: {}",
-                from_email,
-                e,
-                raw.chars().take(100).collect::<String>()
-            );
-        }
-    }
-
     // Пробуем как EncryptedPayload (по magic bytes)
     if encryption::cipher::EncryptedPayload::has_magic_prefix(raw) {
         tracing::debug!(
@@ -236,10 +177,40 @@ async fn decrypt_message(
         .map_err(|_| Error::NotFound(format!("Контакт {} не найден", from_email)))?;
 
     // Получаем публичные ключи контакта
-    let their_keys = contact
-        .public_keys
-        .as_ref()
-        .ok_or_else(|| Error::Encryption("У контакта нет публичных ключей".into()))?;
+    // Пробуем сначала из контакта, потом из conversation_keys
+    let their_keys = if let Some(keys) = &contact.public_keys {
+        keys.clone()
+    } else {
+        // Пытаемся найти ключи в conversation_keys
+        tracing::debug!("У контакта {} нет public_keys, ищем в conversation_keys", from_email);
+        
+        // Находим беседу
+        if let Some(conv) = storage
+            .find_direct_conversation(account_id, contact.id)
+            .await?
+        {
+            // Получаем ключи беседы
+            if let Ok(conv_keys) = storage.get_conversation_keys(conv.id).await {
+                if let Some(their_key_json) = conv_keys.their_public_key_json {
+                    tracing::debug!("Найдены ключи в conversation_keys для беседы {}", conv.id);
+                    serde_json::from_str(&their_key_json)
+                        .map_err(|e| Error::Internal(format!("Ошибка парсинга ключей: {}", e)))?
+                } else {
+                    return Err(Error::Encryption(
+                        "У контакта нет публичных ключей (в conversation_keys их тоже нет)".into()
+                    ));
+                }
+            } else {
+                return Err(Error::Encryption(
+                    "У контакта нет публичных ключей (conversation_keys не найдены)".into()
+                ));
+            }
+        } else {
+            return Err(Error::Encryption(
+                "У контакта нет публичных ключей (беседа не найдена)".into()
+            ));
+        }
+    };
 
     // Вычисляем shared secret
     let their_x25519 = their_keys

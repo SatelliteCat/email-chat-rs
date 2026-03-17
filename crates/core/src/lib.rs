@@ -131,8 +131,6 @@ impl AppState {
 
         let contact_svc = services::contacts::ContactService::new(
             storage.clone(),
-            email.clone(),
-            services::account::AccountService::new(storage.clone(), keystore.clone()),
             events.clone(),
         );
 
@@ -184,10 +182,8 @@ impl AppState {
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(32);
 
         let account_svc = services::account::AccountService::new(storage.clone(), keystore.clone());
-        let contact_svc = services::contacts::ContactService::new(
+        let _contact_svc = services::contacts::ContactService::new(
             storage.clone(),
-            email.clone(),
-            services::account::AccountService::new(storage.clone(), keystore.clone()),
             events.clone(),
         );
         let chat_svc = services::chat::ChatService::new(
@@ -204,7 +200,6 @@ impl AppState {
                 email,
                 storage,
                 account_svc,
-                contact_svc,
                 chat_svc,
                 events,
                 cmd_rx,

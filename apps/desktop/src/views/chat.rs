@@ -23,47 +23,138 @@ pub fn show(
     my_email: &str,
     sender: &EventSender,
 ) {
-    chat_header(ui, conv, sender);
+    chat_header(ui, chat, conv, sender);
     ui.add(egui::Separator::default().spacing(0.0));
     messages_area(ui, chat, my_email);
 }
 
-fn chat_header(ui: &mut Ui, conv: &ConversationItem, sender: &EventSender) {
+fn chat_header(ui: &mut Ui, chat: &mut ChatUiState, conv: &ConversationItem, sender: &EventSender) {
     Frame::none()
         .fill(theme::BG_PANEL)
         .inner_margin(Margin::symmetric(16.0, 10.0))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                super::sidebar::avatar_circle(ui, conv.avatar_letter, 36.0, theme::ACCENT);
-                ui.add_space(10.0);
+            ui.vertical(|ui| {
+                // Верхняя строка: аватар, имя, кнопка удаления
+                ui.horizontal(|ui| {
+                    super::sidebar::avatar_circle(ui, conv.avatar_letter, 36.0, theme::ACCENT);
+                    ui.add_space(10.0);
 
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(&conv.display_name)
-                            .font(FontId::proportional(15.0))
-                            .color(theme::TEXT_PRIMARY)
-                            .strong(),
-                    );
-                    ui.label(
-                        RichText::new("🔒 E2E шифрование")
-                            .font(FontId::proportional(11.0))
-                            .color(theme::SUCCESS),
-                    );
-                });
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(&conv.display_name)
+                                .font(FontId::proportional(15.0))
+                                .color(theme::TEXT_PRIMARY)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new("🔒 E2E шифрование")
+                                .font(FontId::proportional(11.0))
+                                .color(theme::SUCCESS),
+                        );
+                    });
 
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(RichText::new("🗑").font(FontId::proportional(16.0)))
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("🗑").font(FontId::proportional(16.0)),
+                                )
                                 .frame(false),
-                        )
-                        .on_hover_text("Удалить беседу (с сервера)")
-                        .clicked()
-                    {
-                        sender.send(AppEvent::DeleteConversation { conv_id: conv.id });
-                    }
+                            )
+                            .on_hover_text("Удалить беседу (с сервера)")
+                            .clicked()
+                        {
+                            sender.send(AppEvent::DeleteConversation { conv_id: conv.id });
+                        }
+                    });
                 });
+
+                ui.add_space(8.0);
+
+                // Панель управления ключами
+                encryption_keys_panel(ui, chat, conv.id, sender);
             });
+        });
+}
+
+/// Панель управления ключами шифрования диалога.
+fn encryption_keys_panel(ui: &mut Ui, chat: &mut ChatUiState, conv_id: Uuid, sender: &EventSender) {
+    Frame::none()
+        .fill(theme::BG_DARK)
+        .rounding(Rounding::same(8.0))
+        .inner_margin(Margin::symmetric(12.0, 10.0))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("🔑 Ключи шифрования")
+                    .font(FontId::proportional(13.0))
+                    .color(theme::TEXT_PRIMARY)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+
+            // Наш публичный ключ (для копирования)
+            ui.label(
+                RichText::new("Ваш публичный ключ (отправьте собеседнику):")
+                    .font(FontId::proportional(11.0))
+                    .color(theme::TEXT_SECONDARY),
+            );
+            ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut chat.my_public_key)
+                        .hint_text("Нажмите «Сгенерировать»")
+                        .desired_width(300.0)
+                        .font(FontId::monospace(11.0)),
+                );
+                if ui.button("📋 Копировать").clicked() {
+                    if !chat.my_public_key.is_empty() {
+                        ui.ctx()
+                            .output_mut(|o| o.copied_text = chat.my_public_key.clone());
+                    }
+                }
+                if ui.button("🔄 Сгенерировать").clicked() {
+                    // Загружаем/генерируем ключи
+                    sender.send(AppEvent::LoadConversationKeys { conv_id });
+                }
+            });
+
+            ui.add_space(10.0);
+
+            // Поле для вставки публичного ключа собеседника
+            ui.label(
+                RichText::new("Публичный ключ собеседника:")
+                    .font(FontId::proportional(11.0))
+                    .color(theme::TEXT_SECONDARY),
+            );
+            ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut chat.their_public_key_input)
+                        .hint_text("Вставьте публичный ключ собеседника здесь...")
+                        .desired_width(300.0)
+                        .font(FontId::monospace(11.0)),
+                );
+                if ui.button("✓ Сохранить").clicked() {
+                    if !chat.their_public_key_input.trim().is_empty() {
+                        sender.send(AppEvent::SetTheirPublicKey {
+                            conv_id,
+                            public_key_json: chat.their_public_key_input.clone(),
+                        });
+                    }
+                }
+            });
+
+            // Статус
+            if let Some(ref status) = chat.keys_status_message {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(status)
+                        .font(FontId::proportional(10.5))
+                        .color(theme::TEXT_TIMESTAMP),
+                );
+            }
         });
 }
 
@@ -145,6 +236,7 @@ fn message_bubble(ui: &mut Ui, msg: &Message, is_mine: bool) {
             MessageStatus::Sent => " ✓",
             MessageStatus::Delivered => " ✓✓",
             MessageStatus::Read => " ✓✓",
+            MessageStatus::Failed => " ❌",
         }
     } else {
         ""

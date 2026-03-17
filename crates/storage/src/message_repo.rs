@@ -39,8 +39,8 @@ impl MessageRepo {
             r#"
             INSERT INTO messages
                 (id, conversation_id, account_id, from_email, body, kind,
-                 status, reply_to, imap_uid, imap_folder, sent_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 status, reply_to, imap_uid, imap_folder, sent_at, error_message, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             id,
             conv_id,
@@ -53,6 +53,7 @@ impl MessageRepo {
             imap_uid,
             msg.imap_folder,
             sent_at,
+            msg.error_message,
             now,
         )
         .execute(&self.pool)
@@ -85,7 +86,7 @@ impl MessageRepo {
         let rows = if let Some(before) = before_sent_at {
             sqlx::query_as!(
                 MessageRow,
-                r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, created_at AS "created_at!"
+                r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, error_message AS "error_message?", created_at AS "created_at!"
                    FROM messages
                    WHERE conversation_id = ? AND sent_at < ?
                    ORDER BY sent_at DESC
@@ -99,7 +100,7 @@ impl MessageRepo {
         } else {
             sqlx::query_as!(
                 MessageRow,
-                r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, created_at AS "created_at!"
+                r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, error_message AS "error_message?", created_at AS "created_at!"
                    FROM messages
                    WHERE conversation_id = ?
                    ORDER BY sent_at DESC
@@ -138,6 +139,26 @@ impl MessageRepo {
         sqlx::query!(
             "UPDATE messages SET status = ? WHERE id = ?",
             status_str,
+            id_str,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Обновляет статус сообщения и сохраняет ошибку (если есть).
+    pub async fn update_status_with_error(
+        &self,
+        id: Uuid,
+        status: MessageStatus,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let id_str = id.to_string();
+        let status_str = status.as_str();
+        sqlx::query!(
+            "UPDATE messages SET status = ?, error_message = ? WHERE id = ?",
+            status_str,
+            error,
             id_str,
         )
         .execute(&self.pool)
@@ -198,9 +219,24 @@ impl MessageRepo {
         let id_str = account_id.to_string();
         Ok(sqlx::query_as!(
             MessageRow,
-            r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, created_at AS "created_at!"
+            r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, error_message AS "error_message?", created_at AS "created_at!"
                FROM messages
                WHERE account_id = ? AND status = 'queued'
+               ORDER BY sent_at ASC"#,
+            id_str,
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Возвращает сообщения в статусе `failed` для повторной отправки.
+    pub async fn get_failed(&self, account_id: Uuid) -> Result<Vec<MessageRow>> {
+        let id_str = account_id.to_string();
+        Ok(sqlx::query_as!(
+            MessageRow,
+            r#"SELECT id AS "id!", conversation_id AS "conversation_id!", account_id AS "account_id!", from_email AS "from_email!", body, kind AS "kind!", status AS "status!", reply_to, imap_uid, imap_folder, sent_at AS "sent_at!", received_at, error_message AS "error_message?", created_at AS "created_at!"
+               FROM messages
+               WHERE account_id = ? AND status = 'failed'
                ORDER BY sent_at ASC"#,
             id_str,
         )

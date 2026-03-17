@@ -21,7 +21,7 @@ use crate::{
     events::{ChatEvent, EventBus},
     ports::email::DynEmailTransport,
     ports::storage::DynStorage,
-    services::{account::AccountService, chat::ChatService, contacts::ContactService},
+    services::{account::AccountService, chat::ChatService},
 };
 
 /// Команды управления SyncEngine из UI.
@@ -41,7 +41,6 @@ pub fn start(
     email: DynEmailTransport,
     storage: DynStorage,
     account_svc: AccountService,
-    contact_svc: ContactService,
     chat_svc: ChatService,
     events: EventBus,
 ) -> (
@@ -56,7 +55,6 @@ pub fn start(
             email,
             storage,
             account_svc,
-            contact_svc,
             chat_svc,
             events,
             cmd_rx,
@@ -72,7 +70,6 @@ pub(crate) async fn run_sync_loop(
     email: DynEmailTransport,
     storage: DynStorage,
     account_svc: AccountService,
-    contact_svc: ContactService,
     chat_svc: ChatService,
     events: EventBus,
     mut cmd_rx: tokio::sync::mpsc::Receiver<SyncCommand>,
@@ -103,7 +100,6 @@ pub(crate) async fn run_sync_loop(
             since_uid,
             &email,
             &account_svc,
-            &contact_svc,
             &chat_svc,
         )
         .await
@@ -170,7 +166,6 @@ async fn fetch_and_process(
     since_uid: Option<u32>,
     email: &DynEmailTransport,
     account_svc: &AccountService,
-    contact_svc: &ContactService,
     chat_svc: &ChatService,
 ) -> crate::Result<Option<u32>> {
     tracing::info!("Fetch новых писем начиная с UID: {:?}", since_uid);
@@ -194,7 +189,6 @@ async fn fetch_and_process(
             account_id,
             email,
             account_svc,
-            contact_svc,
             chat_svc,
         )
         .await

@@ -1,44 +1,30 @@
-//! ContactService — CRUD контактов и запуск handshake.
+//! ContactService — CRUD контактов.
+//!
+//! Handshake не реализован — пользователь вручную вводит публичный ключ собеседника
+//! через UI (например, сканирует QR-код или копирует из буфера).
 
 use uuid::Uuid;
-use email;
 
 use crate::{
     Error, Result,
-    events::{ChatEvent, EventBus},
+    events::EventBus,
     models::contact::Contact,
-    ports::{
-        email::{DynEmailTransport, OutgoingEmail},
-        storage::{CreateContact, DynStorage, UpdateContact},
-    },
-    services::account::AccountService,
+    ports::storage::{CreateContact, DynStorage, UpdateContact},
 };
 
 pub struct ContactService {
     storage: DynStorage,
-    email: DynEmailTransport,
-    account_svc: AccountService,
     events: EventBus,
 }
 
 impl ContactService {
-    pub fn new(
-        storage: DynStorage,
-        email: DynEmailTransport,
-        account_svc: AccountService,
-        events: EventBus,
-    ) -> Self {
-        Self {
-            storage,
-            email,
-            account_svc,
-            events,
-        }
+    pub fn new(storage: DynStorage, events: EventBus) -> Self {
+        Self { storage, events }
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
 
-    /// Добавляет новый контакт и инициирует handshake.
+    /// Добавляет новый контакт со статусом `NoKey` (ключа ещё нет).
     pub async fn add_contact(
         &self,
         account_id: Uuid,
@@ -59,11 +45,6 @@ impl ContactService {
             .await?;
 
         let contact = self.storage.get_contact(id).await?;
-
-        // Сразу пытаемся отправить handshake
-        // Если контакт без приложения — отправим invite
-        self.initiate_handshake(account_id, id).await?;
-
         Ok(contact)
     }
 
@@ -95,159 +76,25 @@ impl ContactService {
         self.storage.delete_contact(id).await
     }
 
-    // ── Handshake ────────────────────────────────────────────────────────────
+    // ── Ручной ввод ключей ───────────────────────────────────────────────────
 
-    /// Инициирует handshake с контактом.
+    /// Сохраняет публичный ключ контакта (ручной ввод через UI).
     ///
-    /// - Если контакт имеет приложение → отправляет HandshakeInit-письмо
-    /// - Если нет → отправляет invite с зашифрованным payload в теле
-    pub async fn initiate_handshake(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
-        let account = self.storage.get_account(account_id).await?;
-        let contact = self.storage.get_contact(contact_id).await?;
-
-        // Загружаем keypair (или генерируем если отсутствует)
-        let keypair = self.account_svc.load_or_create_keypair(account_id).await?;
-
-        // Формируем handshake payload
-        let handshake_msg =
-            encryption::handshake::HandshakeMessage::new_init(&keypair, &account.email);
-        let handshake_b64 = handshake_msg.to_base64()?;
-
-        // Строим письмо через codec
-        let outgoing_msg = email::codec::encode_handshake(
-            &account.email,
-            &contact.email,
-            &handshake_b64,
-            false,
-        );
-
-        let outgoing_email = OutgoingEmail {
-            from: outgoing_msg.from,
-            to: outgoing_msg.to,
-            subject: outgoing_msg.subject,
-            body: outgoing_msg.body,
-            extra_headers: outgoing_msg.extra_headers,
-        };
-
-        // Пробуем отправить
-        match self.email.send(outgoing_email).await {
-            Ok(()) => {
-                self.storage.set_contact_pending(contact_id).await?;
-                tracing::info!("Handshake отправлен: {} → {}", account.email, contact.email);
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Не удалось отправить handshake: {}. Статус остаётся unregistered.",
-                    e
-                );
-                // Не возвращаем ошибку — статус останется unregistered,
-                // SyncEngine повторит при следующей синхронизации
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Обрабатывает входящий HandshakeAck от контакта.
-    ///
-    /// Вызывается из `sync::processor` когда приходит письмо с Ack.
-    pub async fn handle_handshake_ack(
+    /// После вызова этого метода статус контакта меняется на `HasKey`
+    /// и становится возможным шифрование сообщений.
+    pub async fn set_contact_public_key(
         &self,
-        account_id: Uuid,
-        from_email: &str,
-        their_public_keys: &encryption::keypair::PublicKeys,
+        contact_id: Uuid,
+        public_keys: &encryption::keypair::PublicKeys,
     ) -> Result<()> {
-        let contact = self
-            .storage
-            .get_contact_by_email(account_id, from_email)
-            .await?;
-
-        // Сохраняем публичные ключи как JSON
         let keys_json =
-            serde_json::to_string(their_public_keys).map_err(|e| Error::Internal(e.to_string()))?;
+            serde_json::to_string(public_keys).map_err(|e| Error::Internal(e.to_string()))?;
 
         self.storage
-            .complete_contact_handshake(contact.id, keys_json)
+            .complete_contact_handshake(contact_id, keys_json)
             .await?;
 
-        tracing::info!("Handshake завершён с {}", from_email);
-
-        // Уведомляем UI
-        self.events.emit(ChatEvent::ContactActivated {
-            contact_id: contact.id,
-            email: from_email.to_string(),
-        });
-
-        Ok(())
-    }
-
-    /// Обрабатывает входящий HandshakeInit — отвечает Ack.
-    pub async fn handle_handshake_init(
-        &self,
-        account_id: Uuid,
-        from_email: &str,
-        their_public_keys: &encryption::keypair::PublicKeys,
-    ) -> Result<()> {
-        let account = self.storage.get_account(account_id).await?;
-
-        // Ищем контакт или создаём автоматически
-        let contact = match self
-            .storage
-            .get_contact_by_email(account_id, from_email)
-            .await
-        {
-            Ok(c) => c,
-            Err(_) => {
-                // Автоматически добавляем нового контакта
-                let id = Uuid::new_v4();
-                self.storage
-                    .create_contact(CreateContact {
-                        id,
-                        account_id,
-                        name: from_email.to_string(),
-                        email: from_email.to_string(),
-                        avatar: None,
-                    })
-                    .await?;
-                self.storage.get_contact(id).await?
-            }
-        };
-
-        // Сохраняем публичные ключи
-        let keys_json =
-            serde_json::to_string(their_public_keys).map_err(|e| Error::Internal(e.to_string()))?;
-        self.storage
-            .complete_contact_handshake(contact.id, keys_json)
-            .await?;
-
-        // Отправляем Ack
-        let keypair = self.account_svc.load_or_create_keypair(account_id).await?;
-        let ack_msg = encryption::handshake::HandshakeMessage::new_ack(&keypair, &account.email);
-        let ack_b64 = ack_msg.to_base64()?;
-
-        let outgoing_msg =
-            email::codec::encode_handshake(&account.email, from_email, &ack_b64, true);
-
-        let outgoing_email = OutgoingEmail {
-            from: outgoing_msg.from,
-            to: outgoing_msg.to,
-            subject: outgoing_msg.subject,
-            body: outgoing_msg.body,
-            extra_headers: outgoing_msg.extra_headers,
-        };
-        let send_result = self.email.send(outgoing_email).await;
-        if let Err(e) = send_result {
-            tracing::error!("Ошибка отправки Ack: {}", e);
-            // Не возвращаем ошибку, т.к. мы уже сохранили ключи контакта.
-            // Ack будет повторно отправлен при следующей синхронизации (TODO).
-        } else {
-            tracing::info!("Handshake Ack отправлен → {}", from_email);
-        }
-
-        self.events.emit(ChatEvent::ContactActivated {
-            contact_id: contact.id,
-            email: from_email.to_string(),
-        });
+        tracing::info!("Публичный ключ сохранён для контакта {}", contact_id);
 
         Ok(())
     }

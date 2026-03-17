@@ -148,17 +148,12 @@ async fn test_contact_handshake_flow() {
     let acc_id = create_test_account(&db).await;
     let contact_id = create_test_contact(&db, acc_id, "bob@yandex.ru").await;
 
-    // Начальный статус — unregistered
+    // Начальный статус — nokey
     let c = db.contacts().get_by_id(contact_id).await.unwrap();
-    assert_eq!(c.status, "unregistered");
+    assert_eq!(c.status, "nokey");
     assert!(c.public_keys_json.is_none());
 
-    // Отправили handshake — pending
-    db.contacts().set_pending(contact_id).await.unwrap();
-    let c = db.contacts().get_by_id(contact_id).await.unwrap();
-    assert_eq!(c.status, "pending");
-
-    // Получили ответ — active
+    // Получили ответ — haskey
     let keys_json = r#"{"x25519":"aabbcc","ed25519":"ddeeff"}"#;
     db.contacts()
         .complete_handshake(contact_id, keys_json)
@@ -166,7 +161,7 @@ async fn test_contact_handshake_flow() {
         .unwrap();
 
     let c = db.contacts().get_by_id(contact_id).await.unwrap();
-    assert_eq!(c.status, "active");
+    assert_eq!(c.status, "haskey");
     assert_eq!(c.public_keys_json.as_deref(), Some(keys_json));
     assert!(c.handshake_at.is_some());
 }

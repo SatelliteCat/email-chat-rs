@@ -46,14 +46,14 @@ impl GroupService {
         avatar: Option<Vec<u8>>,
         member_ids: Vec<Uuid>,
     ) -> Result<Uuid> {
-        // Проверяем что все участники Active
+        // Проверяем что все участники имеют ключи
         let mut members_with_roles: Vec<(Uuid, GroupRole, Option<String>)> = Vec::new();
 
         for contact_id in &member_ids {
             let contact = self.storage.get_contact(*contact_id).await?;
-            if contact.status != crate::models::contact::ContactStatus::Active {
+            if contact.status != crate::models::contact::ContactStatus::HasKey {
                 return Err(Error::InvalidState(format!(
-                    "Контакт {} не завершил handshake",
+                    "Контакт {} не имеет публичного ключа",
                     contact.email
                 )));
             }
@@ -104,9 +104,9 @@ impl GroupService {
         }
 
         let contact = self.storage.get_contact(new_contact_id).await?;
-        if contact.status != crate::models::contact::ContactStatus::Active {
+        if contact.status != crate::models::contact::ContactStatus::HasKey {
             return Err(Error::InvalidState(format!(
-                "Контакт {} не завершил handshake",
+                "Контакт {} не имеет публичного ключа",
                 contact.email
             )));
         }

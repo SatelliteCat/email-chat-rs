@@ -22,17 +22,19 @@
 
 pub mod account_repo;
 pub mod contact_repo;
+pub mod conversation_keys_repo;
 pub mod conversation_repo;
 pub mod message_repo;
 pub mod models;
 
 pub use account_repo::AccountRepo;
 pub use contact_repo::ContactRepo;
+pub use conversation_keys_repo::ConversationKeyRepo;
 pub use conversation_repo::ConversationRepo;
 pub use message_repo::MessageRepo;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 use std::str::FromStr;
 use tracing::info;
 
@@ -111,6 +113,11 @@ impl Database {
     /// Репозиторий бесед.
     pub fn conversations(&self) -> ConversationRepo {
         ConversationRepo::new(self.pool.clone())
+    }
+
+    /// Репозиторий ключей диалогов.
+    pub fn conversation_keys(&self) -> ConversationKeyRepo {
+        ConversationKeyRepo::new(self.pool.clone())
     }
 
     /// Репозиторий сообщений.

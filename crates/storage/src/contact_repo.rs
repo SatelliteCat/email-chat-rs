@@ -31,7 +31,7 @@ impl ContactRepo {
             r#"
             INSERT INTO contacts
                 (id, account_id, name, email, avatar, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'unregistered', ?, ?)
+            VALUES (?, ?, ?, ?, ?, 'nokey', ?, ?)
             "#,
             id,
             account_id,
@@ -97,11 +97,12 @@ impl ContactRepo {
     }
 
     /// Возвращает только активные контакты (завершён handshake).
-    pub async fn list_active(&self, account_id: Uuid) -> Result<Vec<ContactRow>> {
+    /// Возвращает контакты с публичными ключами.
+    pub async fn list_with_keys(&self, account_id: Uuid) -> Result<Vec<ContactRow>> {
         let account_id_str = account_id.to_string();
         Ok(sqlx::query_as!(
             ContactRow,
-            r#"SELECT id AS "id!", account_id AS "account_id!", name AS "name!", email AS "email!", avatar, status AS "status!", public_keys_json, handshake_at, created_at AS "created_at!", updated_at AS "updated_at!" FROM contacts WHERE account_id = ? AND status = 'active' ORDER BY name COLLATE NOCASE"#,
+            r#"SELECT id AS "id!", account_id AS "account_id!", name AS "name!", email AS "email!", avatar, status AS "status!", public_keys_json, handshake_at, created_at AS "created_at!", updated_at AS "updated_at!" FROM contacts WHERE account_id = ? AND status = 'haskey' ORDER BY name COLLATE NOCASE"#,
             account_id_str,
         )
         .fetch_all(&self.pool)
@@ -154,29 +155,13 @@ impl ContactRepo {
 
         sqlx::query!(
             r#"UPDATE contacts
-               SET status = 'active',
+               SET status = 'haskey',
                    public_keys_json = ?,
                    handshake_at = ?,
                    updated_at = ?
                WHERE id = ?"#,
             public_keys_json,
             now,
-            now,
-            id_str,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        Ok(())
-    }
-
-    /// Обновляет статус контакта на pending (handshake отправлен).
-    pub async fn set_pending(&self, id: Uuid) -> Result<()> {
-        let id_str = id.to_string();
-        let now = now_iso();
-
-        sqlx::query!(
-            "UPDATE contacts SET status = 'pending', updated_at = ? WHERE id = ?",
             now,
             id_str,
         )

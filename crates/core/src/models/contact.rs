@@ -9,6 +9,7 @@ pub struct Contact {
     pub name: String,
     pub email: String,
     pub avatar: Option<Vec<u8>>,
+    /// Статус контакта — показывает, есть ли публичный ключ для шифрования.
     pub status: ContactStatus,
     /// Публичные ключи (X25519 + Ed25519) после завершения handshake.
     pub public_keys: Option<ContactPublicKeys>,
@@ -17,23 +18,21 @@ pub struct Contact {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Статус контакта — показывает наличие публичного ключа.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContactStatus {
-    /// Приложение не установлено — отправлено приглашение
-    Unregistered,
-    /// Handshake отправлен, ждём ответа
-    Pending,
-    /// Канал установлен, шифруем
-    Active,
+    /// Публичного ключа нет — шифрование невозможно
+    NoKey,
+    /// Публичный ключ сохранён — можно шифровать
+    HasKey,
 }
 
 impl std::fmt::Display for ContactStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ContactStatus::Unregistered => write!(f, "Не зарегистрирован"),
-            ContactStatus::Pending => write!(f, "Ожидание"),
-            ContactStatus::Active => write!(f, "Активен"),
+            ContactStatus::NoKey => write!(f, "Нет ключа"),
+            ContactStatus::HasKey => write!(f, "Ключ есть"),
         }
     }
 }

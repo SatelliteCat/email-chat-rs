@@ -75,6 +75,29 @@ pub enum AppEvent {
         email: String,
     },
 
+    // ── Ключи диалогов ────────────────────────────────────────────────────
+    /// Загрузить ключи диалога
+    LoadConversationKeys {
+        conv_id: Uuid,
+    },
+    /// Ключи диалога загружены
+    ConversationKeysLoaded {
+        conv_id: Uuid,
+        my_public_key: String,
+        their_public_key: Option<String>,
+        is_active: bool,
+    },
+    /// Установить публичный ключ собеседника
+    SetTheirPublicKey {
+        conv_id: Uuid,
+        public_key_json: String,
+    },
+    /// Ключ собеседника установлен
+    TheirPublicKeySet {
+        conv_id: Uuid,
+    },
+    KeysError(String),
+
     // ── Беседы ────────────────────────────────────────────────────────────
     DeleteConversation {
         conv_id: Uuid,

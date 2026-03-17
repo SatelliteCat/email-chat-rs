@@ -47,4 +47,6 @@ pub enum MessageStatus {
     Delivered,
     /// Прочитано
     Read,
+    /// Ошибка отправки
+    Failed,
 }

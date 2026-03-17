@@ -16,14 +16,16 @@ use echat_core::{
         message::{Message, MessageKind as CoreMsgKind, MessageStatus as CoreMsgStatus},
     },
     ports::storage::{
-        CreateAccount, CreateContact, CreateMessage, ImapUidEntry, StoragePort, UpdateContact,
+        ConversationKeys, CreateAccount, CreateContact, CreateMessage, ImapUidEntry, StoragePort,
+        UpdateContact,
     },
 };
 use storage::{
     Database,
     models::{
-        GroupRole, MessageKind, MessageStatus, NewAccount, NewContact, NewDirectConversation,
-        NewGroupConversation, NewGroupMember, NewMessage, Provider, parse_dt,
+        ConversationKeyStatus, GroupRole, MessageKind, MessageStatus, NewAccount, NewContact,
+        NewConversationKeys, NewDirectConversation, NewGroupConversation, NewGroupMember,
+        NewMessage, Provider, parse_dt,
     },
 };
 
@@ -78,9 +80,8 @@ fn to_core_account(row: storage::models::AccountRow) -> CoreResult<Account> {
 
 fn to_core_contact(row: storage::models::ContactRow) -> CoreResult<Contact> {
     let status = match row.status.as_str() {
-        "pending" => CoreContactStatus::Pending,
-        "active" => CoreContactStatus::Active,
-        _ => CoreContactStatus::Unregistered,
+        "haskey" => CoreContactStatus::HasKey,
+        _ => CoreContactStatus::NoKey,
     };
 
     let public_keys = row
@@ -158,8 +159,10 @@ fn to_core_message(row: storage::models::MessageRow) -> CoreResult<Message> {
     let status = match row.status.as_str() {
         "queued" => CoreMsgStatus::Queued,
         "sending" => CoreMsgStatus::Sending,
+        "sent" => CoreMsgStatus::Sent,
         "delivered" => CoreMsgStatus::Delivered,
         "read" => CoreMsgStatus::Read,
+        "failed" => CoreMsgStatus::Failed,
         _ => CoreMsgStatus::Sent,
     };
     Ok(Message {
@@ -312,12 +315,8 @@ impl StoragePort for StorageAdapter {
             .map_err(map_storage_err)
     }
 
-    async fn set_contact_pending(&self, id: Uuid) -> CoreResult<()> {
-        self.db
-            .contacts()
-            .set_pending(id)
-            .await
-            .map_err(map_storage_err)
+    async fn delete_contact(&self, id: Uuid) -> CoreResult<()> {
+        self.db.contacts().delete(id).await.map_err(map_storage_err)
     }
 
     async fn complete_contact_handshake(
@@ -330,10 +329,6 @@ impl StoragePort for StorageAdapter {
             .complete_handshake(id, &public_keys_json)
             .await
             .map_err(map_storage_err)
-    }
-
-    async fn delete_contact(&self, id: Uuid) -> CoreResult<()> {
-        self.db.contacts().delete(id).await.map_err(map_storage_err)
     }
 
     // ── Беседы ───────────────────────────────────────────────────────────────
@@ -499,6 +494,59 @@ impl StoragePort for StorageAdapter {
             .map_err(map_storage_err)
     }
 
+    // ── Ключи диалогов ───────────────────────────────────────────────────────
+
+    async fn create_conversation_keys(
+        &self,
+        conversation_id: Uuid,
+        my_keypair_json: String,
+    ) -> CoreResult<()> {
+        use storage::models::NewConversationKeys;
+        self.db
+            .conversation_keys()
+            .create(&NewConversationKeys {
+                conversation_id,
+                my_keypair_json,
+            })
+            .await
+            .map_err(map_storage_err)
+    }
+
+    async fn get_conversation_keys(&self, conversation_id: Uuid) -> CoreResult<ConversationKeys> {
+        let row = self
+            .db
+            .conversation_keys()
+            .get(conversation_id)
+            .await
+            .map_err(map_storage_err)?;
+        Ok(ConversationKeys {
+            conversation_id,
+            my_keypair_json: row.my_keypair_json,
+            their_public_key_json: row.their_public_key_json,
+            is_active: row.status == "active",
+        })
+    }
+
+    async fn set_conversation_their_public_key(
+        &self,
+        conversation_id: Uuid,
+        their_public_key_json: String,
+    ) -> CoreResult<()> {
+        self.db
+            .conversation_keys()
+            .set_their_public_key(conversation_id, &their_public_key_json)
+            .await
+            .map_err(map_storage_err)
+    }
+
+    async fn are_conversation_keys_active(&self, conversation_id: Uuid) -> CoreResult<bool> {
+        self.db
+            .conversation_keys()
+            .is_active(conversation_id)
+            .await
+            .map_err(map_storage_err)
+    }
+
     // ── Сообщения ────────────────────────────────────────────────────────────
 
     async fn create_message(&self, data: CreateMessage) -> CoreResult<()> {
@@ -521,11 +569,13 @@ impl StoragePort for StorageAdapter {
                     CoreMsgStatus::Sent => MessageStatus::Sent,
                     CoreMsgStatus::Delivered => MessageStatus::Delivered,
                     CoreMsgStatus::Read => MessageStatus::Read,
+                    CoreMsgStatus::Failed => MessageStatus::Failed,
                 },
                 reply_to: data.reply_to,
                 imap_uid: data.imap_uid,
                 imap_folder: data.imap_folder,
                 sent_at: data.sent_at,
+                error_message: data.error_message,
             })
             .await
             .map_err(map_storage_err)
@@ -558,10 +608,32 @@ impl StoragePort for StorageAdapter {
             CoreMsgStatus::Sent => storage::models::MessageStatus::Sent,
             CoreMsgStatus::Delivered => storage::models::MessageStatus::Delivered,
             CoreMsgStatus::Read => storage::models::MessageStatus::Read,
+            CoreMsgStatus::Failed => storage::models::MessageStatus::Failed,
         };
         self.db
             .messages()
             .update_status(id, s)
+            .await
+            .map_err(map_storage_err)
+    }
+
+    async fn update_message_status_with_error(
+        &self,
+        id: Uuid,
+        status: CoreMsgStatus,
+        error: Option<String>,
+    ) -> CoreResult<()> {
+        let s = match status {
+            CoreMsgStatus::Queued => storage::models::MessageStatus::Queued,
+            CoreMsgStatus::Sending => storage::models::MessageStatus::Sending,
+            CoreMsgStatus::Sent => storage::models::MessageStatus::Sent,
+            CoreMsgStatus::Delivered => storage::models::MessageStatus::Delivered,
+            CoreMsgStatus::Read => storage::models::MessageStatus::Read,
+            CoreMsgStatus::Failed => storage::models::MessageStatus::Failed,
+        };
+        self.db
+            .messages()
+            .update_status_with_error(id, s, error.as_deref())
             .await
             .map_err(map_storage_err)
     }

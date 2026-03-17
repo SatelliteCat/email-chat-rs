@@ -152,11 +152,10 @@ fn contact_row(ui: &mut Ui, contact: &Contact, sender: &EventSender) {
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Статус
+                    // Статус — показывает наличие публичного ключа
                     let (status_text, status_color) = match contact.status {
-                        ContactStatus::Active => ("● активен", theme::SUCCESS),
-                        ContactStatus::Pending => ("● ожидание", theme::TEXT_TIMESTAMP),
-                        ContactStatus::Unregistered => ("● нет приложения", theme::TEXT_TIMESTAMP),
+                        ContactStatus::HasKey => ("● ключ есть", theme::SUCCESS),
+                        ContactStatus::NoKey => ("● нет ключа", theme::TEXT_TIMESTAMP),
                     };
                     ui.label(
                         RichText::new(status_text)
@@ -166,22 +165,18 @@ fn contact_row(ui: &mut Ui, contact: &Contact, sender: &EventSender) {
 
                     ui.add_space(8.0);
 
-                    // Кнопка «Написать»
-                    if contact.status == ContactStatus::Active {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new("💬").font(FontId::proportional(14.0)),
-                                )
+                    // Кнопка «Написать» — доступна для контактов с любым статусом
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("💬").font(FontId::proportional(14.0)))
                                 .frame(false),
-                            )
-                            .on_hover_text("Открыть чат")
-                            .clicked()
-                        {
-                            sender.send(AppEvent::OpenChatWith {
-                                contact_id: contact.id,
-                            });
-                        }
+                        )
+                        .on_hover_text("Открыть чат")
+                        .clicked()
+                    {
+                        sender.send(AppEvent::OpenChatWith {
+                            contact_id: contact.id,
+                        });
                     }
 
                     ui.add_space(8.0);

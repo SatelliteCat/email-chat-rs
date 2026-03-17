@@ -61,6 +61,7 @@ pub struct CreateMessage {
     pub imap_uid: Option<u32>,
     pub imap_folder: Option<String>,
     pub sent_at: DateTime<Utc>,
+    pub error_message: Option<String>,
 }
 
 /// UID на IMAP сервере — для удаления писем.
@@ -68,6 +69,15 @@ pub struct CreateMessage {
 pub struct ImapUidEntry {
     pub uid: u32,
     pub folder: String,
+}
+
+/// Ключи диалога.
+#[derive(Debug, Clone)]
+pub struct ConversationKeys {
+    pub conversation_id: Uuid,
+    pub my_keypair_json: Option<String>,
+    pub their_public_key_json: Option<String>,
+    pub is_active: bool,
 }
 
 // ── Трейт ─────────────────────────────────────────────────────────────────────
@@ -90,7 +100,6 @@ pub trait StoragePort: Send + Sync + 'static {
     async fn get_contact_by_email(&self, account_id: Uuid, email: &str) -> Result<Contact>;
     async fn list_contacts(&self, account_id: Uuid) -> Result<Vec<Contact>>;
     async fn update_contact(&self, id: Uuid, data: UpdateContact) -> Result<()>;
-    async fn set_contact_pending(&self, id: Uuid) -> Result<()>;
     async fn complete_contact_handshake(&self, id: Uuid, public_keys_json: String) -> Result<()>;
     async fn delete_contact(&self, id: Uuid) -> Result<()>;
 
@@ -140,6 +149,21 @@ pub trait StoragePort: Send + Sync + 'static {
     async fn remove_group_member(&self, conv_id: Uuid, contact_id: Uuid) -> Result<()>;
     async fn delete_conversation(&self, id: Uuid) -> Result<()>;
 
+    // ── Ключи диалогов ───────────────────────────────────────────────────────
+
+    async fn create_conversation_keys(
+        &self,
+        conversation_id: Uuid,
+        my_keypair_json: String,
+    ) -> Result<()>;
+    async fn get_conversation_keys(&self, conversation_id: Uuid) -> Result<ConversationKeys>;
+    async fn set_conversation_their_public_key(
+        &self,
+        conversation_id: Uuid,
+        their_public_key_json: String,
+    ) -> Result<()>;
+    async fn are_conversation_keys_active(&self, conversation_id: Uuid) -> Result<bool>;
+
     // ── Сообщения ────────────────────────────────────────────────────────────
 
     async fn create_message(&self, data: CreateMessage) -> Result<()>;
@@ -151,6 +175,12 @@ pub trait StoragePort: Send + Sync + 'static {
         limit: usize,
     ) -> Result<Vec<Message>>;
     async fn update_message_status(&self, id: Uuid, status: MessageStatus) -> Result<()>;
+    async fn update_message_status_with_error(
+        &self,
+        id: Uuid,
+        status: MessageStatus,
+        error: Option<String>,
+    ) -> Result<()>;
     async fn get_imap_uids_for_deletion(&self, conv_id: Uuid) -> Result<Vec<ImapUidEntry>>;
     async fn delete_conversation_messages(&self, conv_id: Uuid) -> Result<()>;
     async fn get_queued_messages(&self, account_id: Uuid) -> Result<Vec<Message>>;
