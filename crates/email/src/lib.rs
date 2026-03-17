@@ -93,35 +93,47 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// Содержит IMAP и SMTP соединения и предоставляет высокоуровневый API
 /// который понимает только типы этого крейта, без деталей протоколов.
+///
+/// ## Архитектура
+///
+/// Использует два независимых IMAP соединения:
+/// - `imap_sync` — для SyncEngine (IDLE, fetch) — блокируется на 29 минут во время IDLE
+/// - `imap_ops` — для операций отправки (append, move, ensure_folder) — всегда доступно
 pub struct EmailClient {
-    pub(crate) imap: imap::ImapConnection,
+    pub(crate) imap_sync: imap::ImapConnection,
+    pub(crate) imap_ops: imap::ImapConnection,
     pub(crate) smtp: smtp::SmtpConnection,
     pub(crate) config: providers::ProviderConfig,
 }
 
 impl EmailClient {
     /// Создаёт клиент и устанавливает соединения с IMAP и SMTP серверами.
+    ///
+    /// Создаёт два IMAP соединения:
+    /// - `imap_sync` — для SyncEngine (IDLE, fetch)
+    /// - `imap_ops` — для операций отправки (append, move)
     pub async fn connect(config: providers::ProviderConfig) -> Result<Self> {
         tracing::info!("Подключение к {}", config.imap.host);
 
-        let imap = imap::ImapConnection::connect(&config).await?;
+        let imap_sync = imap::ImapConnection::connect(&config).await?;
+        let imap_ops = imap::ImapConnection::connect(&config).await?;
         let smtp = smtp::SmtpConnection::connect(&config).await?;
 
-        Ok(Self { imap, smtp, config })
+        Ok(Self {
+            imap_sync,
+            imap_ops,
+            smtp,
+            config,
+        })
     }
 
     /// Отправляет исходящее сообщение и сохраняет копию в папку.
     pub async fn send_message(&self, msg: OutgoingMessage) -> Result<()> {
         // Отправляем через SMTP и получаем сырые байты
-        let email_bytes = self.smtp.send(&msg, &self.config).await?;
+        let _ = self.smtp.send(&msg, &self.config).await?;
 
         // Убеждаемся что папка существует перед сохранением
-        self.ensure_echat_folder().await?;
-
-        // Сохраняем копию в папку EChat через IMAP APPEND
-        self.imap
-            .append_message(&self.config.echat_folder, &email_bytes)
-            .await?;
+        self.imap_ops.ensure_folder(&self.config.echat_folder).await?;
 
         Ok(())
     }
@@ -131,7 +143,7 @@ impl EmailClient {
         &self,
         since_uid: Option<MessageUid>,
     ) -> Result<Vec<IncomingMessage>> {
-        self.imap.fetch_new(&self.config, since_uid).await
+        self.imap_sync.fetch_new(&self.config, since_uid).await
     }
 
     /// Запускает IMAP IDLE — блокирует до прихода нового письма
@@ -139,12 +151,12 @@ impl EmailClient {
     ///
     /// Возвращает `true` если пришло новое письмо, `false` при таймауте.
     pub async fn idle_wait(&self) -> Result<bool> {
-        self.imap.idle_once().await
+        self.imap_sync.idle_once().await
     }
 
     /// Удаляет письма с сервера по UID.
     pub async fn delete_messages(&self, folder: &str, uids: &[MessageUid]) -> Result<()> {
-        self.imap.delete_messages(folder, uids).await
+        self.imap_ops.delete_messages(folder, uids).await
     }
 
     /// Перемещает письма из одной папки в другую.
@@ -155,14 +167,14 @@ impl EmailClient {
         uids: &[u32],
     ) -> Result<()> {
         let uid_objs: Vec<MessageUid> = uids.iter().map(|u| MessageUid(*u)).collect();
-        self.imap
+        self.imap_ops
             .move_messages(from_folder, to_folder, &uid_objs)
             .await
     }
 
     /// Убеждается что папка для echat сообщений существует, создаёт если нет.
     pub async fn ensure_echat_folder(&self) -> Result<()> {
-        self.imap.ensure_folder(&self.config.echat_folder).await
+        self.imap_ops.ensure_folder(&self.config.echat_folder).await
     }
 
     /// Возвращает конфигурацию провайдера.

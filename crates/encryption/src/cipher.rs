@@ -79,8 +79,14 @@ impl EncryptedPayload {
     /// Используется для фильтрации писем в SyncEngine.
     pub fn has_magic_prefix(base64_body: &str) -> bool {
         use base64::{engine::general_purpose::STANDARD, Engine};
-        // Первые ~8 символов base64 соответствуют первым 6 байтам
-        let prefix = &base64_body.trim()[..base64_body.len().min(8)];
+        // Первые ~8 байт base64 соответствуют первым 6 байтам декодированных данных
+        // Используем байтовую индексацию чтобы избежать паники на UTF-8 границах
+        let trimmed = base64_body.trim();
+        let prefix = if trimmed.len() >= 8 {
+            &trimmed.as_bytes()[..8]
+        } else {
+            trimmed.as_bytes()
+        };
         if let Ok(bytes) = STANDARD.decode(prefix) {
             bytes.starts_with(&MAGIC)
         } else {

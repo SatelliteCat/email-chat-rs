@@ -107,10 +107,16 @@ impl ChatService {
                 (Some(my_keys_json), Some(their_key_json)) => {
                     // Ключи диалога активны — шифруем и отправляем
                     tracing::info!("Ключи диалога активны, шифруем сообщение...");
-                    
+                    tracing::debug!("my_keypair_json (первые 50): {:?}", my_keys_json.chars().take(50).collect::<String>());
+                    tracing::debug!("their_key_json (первые 50): {:?}", their_key_json.chars().take(50).collect::<String>());
+
+                    // their_key_json хранится как JSON PublicKeys (сериализованный)
                     let their_keys: encryption::keypair::PublicKeys =
                         serde_json::from_str(their_key_json)
-                            .map_err(|e| Error::Internal(e.to_string()))?;
+                            .map_err(|e| {
+                                tracing::error!("Ошибка парсинга their_key_json={:?}: {}", their_key_json, e);
+                                Error::Internal(format!("Ошибка парсинга ключей: {}", e))
+                            })?;
 
                     let ciphertext = self
                         .encrypt_direct_with_keys(
@@ -333,12 +339,15 @@ impl ChatService {
 
         // Генерируем пару ключей для этого диалога
         let keypair = encryption::keypair::IdentityKeypair::generate();
-        let public_keys = keypair.public_keys();
-        let keys_json =
-            serde_json::to_string(&public_keys).map_err(|e| Error::Internal(e.to_string()))?;
+        
+        // Сохраняем seed приватного ключа в base64
+        let seed_base64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            keypair.seed().as_bytes(),
+        );
 
         self.storage
-            .create_conversation_keys(conv_id, keys_json)
+            .create_conversation_keys(conv_id, seed_base64)
             .await?;
 
         self.storage.get_conversation(conv_id).await
@@ -360,21 +369,29 @@ impl ChatService {
     pub async fn set_their_public_key(
         &self,
         conv_id: Uuid,
-        their_public_key_json: String,
+        their_public_key_base64: String,
     ) -> Result<()> {
-        // Сохраняем ключ в conversation_keys
+        // their_public_key_base64 — это PublicKeys в base64 формате
+        // Сохраняем как JSON (декодируем из base64)
+        let their_keys = encryption::keypair::PublicKeys::from_base64(&their_public_key_base64)
+            .map_err(|e| Error::Internal(format!("Ошибка парсинга ключа собеседника: {}", e)))?;
+        
+        let their_key_json = serde_json::to_string(&their_keys)
+            .map_err(|e| Error::Internal(format!("Ошибка сериализации ключа: {}", e)))?;
+
+        // Сохраняем ключ в conversation_keys (в JSON формате)
         self.storage
-            .set_conversation_their_public_key(conv_id, their_public_key_json.clone())
+            .set_conversation_their_public_key(conv_id, their_key_json.clone())
             .await?;
 
         // Получаем беседу чтобы найти contact_id
         let conv = self.storage.get_conversation(conv_id).await?;
-        
+
         // Если это direct беседа, обновляем статус контакта
         if let crate::models::conversation::ConversationKind::Direct { contact_id } = conv.kind {
-            // Обновляем статус контакта на HasKey и сохраняем публичный ключ
+            // Сохраняем публичный ключ в контакте (в JSON формате)
             self.storage
-                .complete_contact_handshake(contact_id, their_public_key_json)
+                .complete_contact_handshake(contact_id, their_key_json)
                 .await?;
         }
 
@@ -436,10 +453,10 @@ impl ChatService {
         imap_folder: String,
     ) -> Result<()> {
         // Дедупликация
-        if self.storage.message_exists(msg_id).await? {
-            tracing::debug!("Дубликат сообщения {}, пропускаем", msg_id);
-            return Ok(());
-        }
+        // if self.storage.message_exists(msg_id).await? {
+        //     tracing::debug!("Дубликат сообщения {}, пропускаем", msg_id);
+        //     return Ok(());
+        // }
 
         // Находим контакт по email
         let contact = self
@@ -510,23 +527,32 @@ impl ChatService {
     // ── Внутренние методы ─────────────────────────────────────────────────────
 
     /// Шифрует сообщение для direct-чата используя ключи диалога.
-    ///
-    /// NOTE: Сейчас использует ключи аккаунта для шифрования.
-    /// Ключи диалога хранятся только для отображения пользователю (копировать/вставить).
     async fn encrypt_direct_with_keys(
         &self,
-        _my_keypair_json: &str,
+        my_keypair_json: &str,
         their_keys: &encryption::keypair::PublicKeys,
         conv_id: Uuid,
         msg_id: Uuid,
         body: &str,
         reply_to: Option<Uuid>,
         sent_at: &chrono::DateTime<Utc>,
-        account_id: Uuid,
+        _account_id: Uuid,
     ) -> Result<String> {
-        // Используем ключи аккаунта для шифрования
-        // Ключи диалога — только для UI (копировать/вставить публичный ключ)
-        let keypair = self.account_svc.load_or_create_keypair(account_id).await?;
+        // Используем ключи диалога для шифрования
+        // my_keypair_json содержит seed в base64
+        let seed_bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            my_keypair_json,
+        )
+        .map_err(|e| Error::Internal(format!("Ошибка декодирования seed: {}", e)))?;
+
+        let seed_array: [u8; 32] = seed_bytes
+            .try_into()
+            .map_err(|_| Error::Internal("Неверный размер seed".into()))?;
+
+        let keypair = encryption::keypair::IdentityKeypair::from_seed(
+            encryption::keypair::KeySeed::from_bytes(seed_array),
+        );
 
         let shared_secret = encryption::session::derive_from_bytes(
             keypair.secret_key(),

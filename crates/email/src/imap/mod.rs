@@ -60,8 +60,8 @@ impl ImapConnection {
         let mut guard = self.inner.lock().await;
         let session = self.get_or_reconnect(&mut guard, config).await?;
 
-        // Выбираем папку EChat
-        let folder = &config.echat_folder;
+        // Выбираем папку INBOX для получения новых писем
+        let folder = "INBOX";
         session
             .select(folder)
             .await
@@ -78,6 +78,8 @@ impl ImapConnection {
             .uid_search(format!("UID {}", uid_set))
             .await
             .map_err(|e| Error::Imap(e.to_string()))?;
+
+        tracing::debug!("IMAP UID SEARCH: folder={}, uid_set={}, найдено {} писем", folder, uid_set, uids.len());
 
         if uids.is_empty() {
             return Ok(vec![]);
@@ -120,10 +122,14 @@ impl ImapConnection {
     /// Возвращает `true` если пришло новое письмо.
     pub async fn idle_once(&self) -> Result<bool> {
         let mut guard = self.inner.lock().await;
-        let session = guard.take().ok_or(Error::Disconnected)?;
+        let mut session = guard.take().ok_or(Error::Disconnected)?;
 
-        // Выбираем папку перед IDLE
-        // (session уже должна быть в нужной папке после fetch)
+        // Выбираем INBOX перед IDLE
+        session
+            .select("INBOX")
+            .await
+            .map_err(|e| Error::Imap(e.to_string()))?;
+
         let idle_result = run_idle(session, Duration::from_secs(29 * 60)).await;
 
         match idle_result {

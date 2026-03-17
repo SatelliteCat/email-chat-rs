@@ -75,7 +75,10 @@ pub(crate) async fn run_sync_loop(
     mut cmd_rx: tokio::sync::mpsc::Receiver<SyncCommand>,
 ) {
     let mut reconnect_delay = Duration::from_secs(5);
-    const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(300); // 5 минут
+    const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30); // 0,5 минут
+    
+    // Heartbeat — проверка соединения каждые 60 секунд
+    let mut heartbeat_interval = tokio::time::interval(Duration::from_secs(60));
 
     tracing::info!("SyncEngine запущен для аккаунта {}", account_id);
     events.emit(ChatEvent::SyncStateChanged { connected: false });
@@ -90,6 +93,8 @@ pub(crate) async fn run_sync_loop(
                 continue;
             }
         };
+
+        tracing::info!("Sync цикл: last_imap_uid={:?}", since_uid);
 
         // Сначала получаем все пропущенные письма
         events.emit(ChatEvent::SyncStateChanged { connected: true });
@@ -106,9 +111,12 @@ pub(crate) async fn run_sync_loop(
         {
             Ok(max_uid) => {
                 if let Some(uid) = max_uid {
+                    tracing::info!("Обновляю last_imap_uid={} для аккаунта {}", uid, account_id);
                     if let Err(e) = storage.update_account_sync_state(account_id, uid).await {
                         tracing::warn!("Не удалось обновить sync state: {}", e);
                     }
+                } else {
+                    tracing::debug!("Новых писем нет, last_imap_uid не обновляется");
                 }
             }
             Err(e) => {
@@ -124,12 +132,17 @@ pub(crate) async fn run_sync_loop(
         }
 
         // IDLE ожидание новых писем
+        tracing::debug!("Запуск IMAP IDLE для ожидания новых писем...");
         tokio::select! {
             idle_result = email.idle_wait() => {
                 match idle_result {
                     Ok(has_new) => {
+                        tracing::debug!("IMAP IDLE: has_new={}", has_new);
                         if has_new {
+                            tracing::info!("Получено уведомление о новых письмах через IDLE");
                             // Следующая итерация цикла подхватит их
+                        } else {
+                            tracing::debug!("IDLE таймаут (29 мин) — переподключение");
                         }
                         // таймаут IDLE — тоже OK, просто переподключаемся
                     }
@@ -142,10 +155,16 @@ pub(crate) async fn run_sync_loop(
                 }
             }
 
+            // Heartbeat — проверка соединения каждые 60 секунд
+            _ = heartbeat_interval.tick() => {
+                tracing::debug!("Heartbeat: проверка соединения...");
+                // Просто продолжаем цикл — fetch проверит соединение
+            }
+
             cmd = cmd_rx.recv() => {
                 match cmd {
                     Some(SyncCommand::FetchNow) => {
-                        tracing::debug!("SyncCommand::FetchNow получен");
+                        tracing::info!("SyncCommand::FetchNow получен — принудительная синхронизация");
                         // продолжаем цикл — fetch будет на следующей итерации
                     }
                     Some(SyncCommand::Stop) | None => {
@@ -172,19 +191,19 @@ async fn fetch_and_process(
 
     let messages = email.fetch_new(since_uid).await?;
 
+    tracing::info!("Получено {} писем из IMAP", messages.len());
+
     if messages.is_empty() {
         tracing::debug!("Новых писем нет");
         return Ok(None);
     }
-
-    tracing::info!("Получено {} новых писем", messages.len());
 
     let mut max_uid: Option<u32> = None;
 
     for msg in messages {
         let uid = msg.uid;
 
-        if let Err(e) = super::processor::process_incoming(
+        match super::processor::process_incoming(
             &msg,
             account_id,
             email,
@@ -193,8 +212,17 @@ async fn fetch_and_process(
         )
         .await
         {
-            tracing::warn!("Ошибка обработки письма uid={}: {}", uid, e);
-            // Не прерываем — продолжаем остальные
+            Ok(()) => {
+                tracing::debug!("Письмо uid={} успешно обработано", uid);
+            }
+            Err(e) => {
+                // Игнорируем дедупликацию — письмо уже обработано
+                if e.to_string().contains("Уже существует") {
+                    tracing::debug!("Письмо uid={} уже обработано (дедупликация)", uid);
+                } else {
+                    tracing::warn!("Ошибка обработки письма uid={}: {}", uid, e);
+                }
+            }
         }
 
         max_uid = Some(max_uid.map_or(uid, |m: u32| m.max(uid)));

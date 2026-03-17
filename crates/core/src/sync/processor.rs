@@ -51,13 +51,13 @@ pub async fn process_incoming(
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
-    tracing::debug!("Заголовки письма: {:?}", headers);
+    // tracing::debug!("Заголовки письма: {:?}", headers);
 
     if !encryption::disguise::is_echat_message(&headers, Some(&email.body)) {
         tracing::debug!("Письмо от {} не является echat-сообщением", email.from);
         tracing::debug!(
-            "Тело письма (первые 200 символов): {}",
-            email.body.chars().take(200).collect::<String>()
+            "Тело письма (первые 50 символов): {}",
+            email.body.chars().take(50).collect::<String>()
         );
         return Ok(()); // обычное письмо — пропускаем
     }
@@ -70,6 +70,12 @@ pub async fn process_incoming(
         if let Ok(account) = account_svc.storage().get_account(account_id).await {
             let target_folder = &account.echat_folder;
             if target_folder != "INBOX" {
+                // Убеждаемся что папка существует
+                tracing::debug!("Проверяем/создаём папку {}", target_folder);
+                if let Err(e) = email_transport.ensure_echat_folder().await {
+                    tracing::warn!("Не удалось создать папку {}: {}", target_folder, e);
+                }
+                
                 tracing::debug!("Перемещаем письмо из INBOX в {}", target_folder);
                 match email_transport
                     .move_messages("INBOX", target_folder, &[email.uid])
@@ -95,8 +101,8 @@ pub async fn process_incoming(
     let raw = encryption::disguise::extract_payload(&email.body);
     let raw_single_line: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
     tracing::debug!(
-        "Payload (первые 100 символов): {}",
-        raw_single_line.chars().take(100).collect::<String>()
+        "Payload (первые 50 символов): {}",
+        raw_single_line.chars().take(50).collect::<String>()
     );
 
     // Шаг 4: определяем тип и направляем в сервис
@@ -107,7 +113,8 @@ pub async fn process_incoming(
             // Пытаемся расшифровать
             match decrypt_message(account_id, &email.from, &payload_b64, account_svc).await {
                 Ok((conv_id, msg_id, body, sent_at)) => {
-                    chat_svc
+                    tracing::info!("Вызов handle_incoming для msg_id={}", msg_id);
+                    match chat_svc
                         .handle_incoming(
                             account_id,
                             email.from.clone(),
@@ -118,7 +125,14 @@ pub async fn process_incoming(
                             email.uid,
                             email.folder.clone(),
                         )
-                        .await?;
+                        .await
+                    {
+                        Ok(()) => tracing::info!("handle_incoming успешен для msg_id={}", msg_id),
+                        Err(e) => {
+                            tracing::error!("handle_incoming ошибка для msg_id={}: {}", msg_id, e);
+                            return Err(e);
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("Не удалось расшифровать сообщение от {}: {}", email.from, e);
@@ -165,60 +179,76 @@ async fn decrypt_message(
     payload_b64: &str,
     account_svc: &AccountService,
 ) -> Result<(Uuid, Uuid, String, chrono::DateTime<chrono::Utc>)> {
-    // Загружаем наш keypair
-    let keypair = account_svc.load_or_create_keypair(account_id).await?;
-
-    // Находим контакт по email чтобы получить его публичные ключи
-    // Используем storage напрямую через trait object
     let storage = account_svc.storage();
+
+    // Находим контакт по email
     let contact = storage
         .get_contact_by_email(account_id, from_email)
         .await
         .map_err(|_| Error::NotFound(format!("Контакт {} не найден", from_email)))?;
 
-    // Получаем публичные ключи контакта
-    // Пробуем сначала из контакта, потом из conversation_keys
-    let their_keys = if let Some(keys) = &contact.public_keys {
-        keys.clone()
+    // Находим беседу
+    let conv = storage
+        .find_direct_conversation(account_id, contact.id)
+        .await?
+        .ok_or_else(|| Error::NotFound("Беседа не найдена".into()))?;
+
+    // Получаем ключи диалога
+    let conv_keys = storage
+        .get_conversation_keys(conv.id)
+        .await
+        .map_err(|e| Error::Encryption(format!("Ключи диалога не найдены: {}", e)))?;
+
+    // Получаем наш keypair из ключей диалога
+    // my_keypair_json может быть:
+    // - base64 seed (новый формат)
+    // - JSON публичных ключей (старый формат, для обратной совместимости)
+    let my_keypair_json = conv_keys
+        .my_keypair_json
+        .ok_or_else(|| Error::Encryption("Наш keypair в диалоге не найден".into()))?;
+
+    let keypair = if my_keypair_json.starts_with('{') {
+        // Старый формат: JSON публичных ключей — ошибка, нужны пересоздать беседу
+        tracing::warn!("Обнаружен старый формат ключей диалога (JSON)");
+        return Err(Error::Encryption(
+            "Старый формат ключей диалога. Пересоздайте беседу.".into()
+        ));
     } else {
-        // Пытаемся найти ключи в conversation_keys
-        tracing::debug!("У контакта {} нет public_keys, ищем в conversation_keys", from_email);
-        
-        // Находим беседу
-        if let Some(conv) = storage
-            .find_direct_conversation(account_id, contact.id)
-            .await?
-        {
-            // Получаем ключи беседы
-            if let Ok(conv_keys) = storage.get_conversation_keys(conv.id).await {
-                if let Some(their_key_json) = conv_keys.their_public_key_json {
-                    tracing::debug!("Найдены ключи в conversation_keys для беседы {}", conv.id);
-                    serde_json::from_str(&their_key_json)
-                        .map_err(|e| Error::Internal(format!("Ошибка парсинга ключей: {}", e)))?
-                } else {
-                    return Err(Error::Encryption(
-                        "У контакта нет публичных ключей (в conversation_keys их тоже нет)".into()
-                    ));
-                }
-            } else {
-                return Err(Error::Encryption(
-                    "У контакта нет публичных ключей (conversation_keys не найдены)".into()
-                ));
-            }
-        } else {
-            return Err(Error::Encryption(
-                "У контакта нет публичных ключей (беседа не найдена)".into()
-            ));
-        }
+        // Новый формат: base64 seed
+        let seed_bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &my_keypair_json,
+        )
+        .map_err(|e| Error::Internal(format!("Ошибка декодирования seed: {}", e)))?;
+
+        let seed_array: [u8; 32] = seed_bytes
+            .try_into()
+            .map_err(|_| Error::Internal("Неверный размер seed".into()))?;
+
+        encryption::keypair::IdentityKeypair::from_seed(
+            encryption::keypair::KeySeed::from_bytes(seed_array),
+        )
     };
 
-    // Вычисляем shared secret
-    let their_x25519 = their_keys
-        .x25519_bytes()
-        .ok_or_else(|| Error::Encryption("Некорректный X25519 ключ контакта".into()))?;
+    // Получаем публичный ключ собеседника из ключей диалога
+    // their_public_key_json хранится как JSON PublicKeys
+    let their_key_json = conv_keys
+        .their_public_key_json
+        .ok_or_else(|| Error::Encryption("Публичный ключ собеседника в диалоге не найден".into()))?;
 
+    tracing::debug!("their_key_json (первые 50): {:?}", their_key_json.chars().take(50).collect::<String>());
+
+    // Парсим JSON PublicKeys
+    let their_keys: encryption::keypair::PublicKeys =
+        serde_json::from_str(&their_key_json)
+            .map_err(|e| {
+                tracing::error!("Ошибка парсинга their_key_json={:?}: {}", their_key_json, e);
+                Error::Internal(format!("Ошибка парсинга ключей собеседника: {}", e))
+            })?;
+
+    // Вычисляем shared secret используя ключи диалога
     let shared_secret =
-        encryption::session::derive_from_bytes(keypair.secret_key(), &their_x25519, "direct-chat")
+        encryption::session::derive_from_bytes(keypair.secret_key(), &their_keys.x25519, "direct-chat")
             .map_err(|e| Error::Encryption(e.to_string()))?;
 
     // Декодируем и расшифровываем payload
@@ -241,6 +271,8 @@ async fn decrypt_message(
         .as_str()
         .ok_or_else(|| Error::Internal("conv_id не найден".into()))
         .and_then(|s| Uuid::parse_str(s).map_err(|e| Error::Internal(e.to_string())))?;
+
+    tracing::info!("Расшифровано сообщение: msg_id={}, conv_id={}, from={}", msg_id, conv_id, from_email);
 
     let body = envelope["body"]
         .as_str()

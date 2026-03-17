@@ -165,7 +165,7 @@ pub struct MessageRow {
     pub kind: String,
     pub status: String,
     #[sqlx(default)]
-    pub reply_to: Option<String>,
+    pub reply_to_id: Option<String>,
     #[sqlx(default)]
     pub imap_uid: Option<i64>,
     #[sqlx(default)]
@@ -189,10 +189,18 @@ pub struct NewMessage {
     pub kind: MessageKind,
     pub status: MessageStatus,
     pub reply_to: Option<Uuid>,
+    pub reply_to_account_id: Option<Uuid>,
     pub imap_uid: Option<u32>,
     pub imap_folder: Option<String>,
     pub sent_at: DateTime<Utc>,
     pub error_message: Option<String>,
+}
+
+impl NewMessage {
+    pub fn reply_to_account_id(&self) -> Option<Uuid> {
+        // reply_to всегда принадлежит тому же аккаунту что и сообщение
+        self.reply_to.map(|_| self.account_id)
+    }
 }
 
 /// Запись UID для удаления с IMAP сервера.

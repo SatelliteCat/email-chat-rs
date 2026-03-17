@@ -64,6 +64,13 @@ pub struct CreateMessage {
     pub error_message: Option<String>,
 }
 
+impl CreateMessage {
+    pub fn reply_to_account_id(&self) -> Option<Uuid> {
+        // reply_to всегда принадлежит тому же аккаунту что и сообщение
+        self.reply_to.map(|_| self.account_id)
+    }
+}
+
 /// UID на IMAP сервере — для удаления писем.
 #[derive(Debug, Clone)]
 pub struct ImapUidEntry {
@@ -167,7 +174,7 @@ pub trait StoragePort: Send + Sync + 'static {
     // ── Сообщения ────────────────────────────────────────────────────────────
 
     async fn create_message(&self, data: CreateMessage) -> Result<()>;
-    async fn message_exists(&self, id: Uuid) -> Result<bool>;
+    async fn message_exists(&self, id: Uuid, account_id: Option<Uuid>) -> Result<bool>;
     async fn get_message_history(
         &self,
         conv_id: Uuid,

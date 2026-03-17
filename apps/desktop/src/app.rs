@@ -53,6 +53,14 @@ impl eframe::App for EchatApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_events();
         self.ui.expire_toasts();
+        
+        // Проверка флага принудительной синхронизации
+        if self.ui.force_sync {
+            self.ui.force_sync = false;
+            if let Some(ref cmd_tx) = self._sync_cmd_tx {
+                let _ = cmd_tx.try_send(echat_core::sync::engine::SyncCommand::FetchNow);
+            }
+        }
 
         match self.ui.screen.clone() {
             Screen::Login => self.draw_login(ctx),
@@ -704,10 +712,22 @@ impl EchatApp {
         self.rt.spawn(async move {
             match state.chat_service.get_conversation_keys(conv_id).await {
                 Ok(keys) => {
-                    // Извлекаем публичный ключ из my_keypair_json
-                    let my_public_key = keys.my_keypair_json.and_then(|json| {
-                        // my_keypair_json содержит PublicKeys (публичные ключи)
-                        Some(json) // Пока просто возвращаем JSON как есть
+                    // Извлекаем публичный ключ из my_keypair_json (seed в base64)
+                    let my_public_key = keys.my_keypair_json.and_then(|seed_base64| {
+                        // Декодируем seed и генерируем keypair
+                        let seed_bytes = match base64::Engine::decode(
+                            &base64::engine::general_purpose::STANDARD,
+                            &seed_base64,
+                        ) {
+                            Ok(b) => b,
+                            Err(_) => return None,
+                        };
+                        let seed_array: [u8; 32] = seed_bytes.try_into().ok()?;
+                        let keypair = encryption::keypair::IdentityKeypair::from_seed(
+                            encryption::keypair::KeySeed::from_bytes(seed_array),
+                        );
+                        // Возвращаем публичные ключи в base64
+                        keypair.public_keys().to_base64().ok()
                     });
 
                     sender.send(AppEvent::ConversationKeysLoaded {

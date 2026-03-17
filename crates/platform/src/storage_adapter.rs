@@ -176,7 +176,7 @@ fn to_core_message(row: storage::models::MessageRow) -> CoreResult<Message> {
         kind,
         status,
         reply_to: row
-            .reply_to
+            .reply_to_id
             .as_deref()
             .and_then(|s| Uuid::parse_str(s).ok()),
         imap_uid: row.imap_uid.map(|u| u as u32),
@@ -550,6 +550,8 @@ impl StoragePort for StorageAdapter {
     // ── Сообщения ────────────────────────────────────────────────────────────
 
     async fn create_message(&self, data: CreateMessage) -> CoreResult<()> {
+        let reply_to_account_id = data.reply_to_account_id();
+        
         self.db
             .messages()
             .create(&NewMessage {
@@ -572,6 +574,7 @@ impl StoragePort for StorageAdapter {
                     CoreMsgStatus::Failed => MessageStatus::Failed,
                 },
                 reply_to: data.reply_to,
+                reply_to_account_id,
                 imap_uid: data.imap_uid,
                 imap_folder: data.imap_folder,
                 sent_at: data.sent_at,
@@ -581,8 +584,8 @@ impl StoragePort for StorageAdapter {
             .map_err(map_storage_err)
     }
 
-    async fn message_exists(&self, id: Uuid) -> CoreResult<bool> {
-        self.db.messages().exists(id).await.map_err(map_storage_err)
+    async fn message_exists(&self, id: Uuid, account_id: Option<Uuid>) -> CoreResult<bool> {
+        self.db.messages().exists(id, account_id).await.map_err(map_storage_err)
     }
 
     async fn get_message_history(

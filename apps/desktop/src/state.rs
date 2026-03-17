@@ -70,6 +70,8 @@ pub struct UiState {
     // ── Статус синхронизации ─────────────────────────────────────────────────
     pub sync_connected: bool,
     pub sync_error: Option<String>,
+    /// Флаг для принудительной синхронизации
+    pub force_sync: bool,
 }
 
 impl UiState {

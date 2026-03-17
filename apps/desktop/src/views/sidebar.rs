@@ -66,6 +66,20 @@ pub fn show(ui: &mut Ui, state: &mut UiState) -> Option<Uuid> {
                     });
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // Кнопка синхронизации
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("🔄").font(FontId::proportional(14.0)),
+                                )
+                                .frame(false),
+                            )
+                            .on_hover_text("Синхронизировать")
+                            .clicked()
+                        {
+                            state.force_sync = true;
+                        }
+                        
                         if ui
                             .add(
                                 egui::Button::new(
