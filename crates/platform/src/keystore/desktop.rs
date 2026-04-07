@@ -30,6 +30,8 @@ impl KeystorePort for DesktopKeystore {
         let full_service = format!("echat.{}", service);
         let encoded = STANDARD.encode(secret);
 
+        tracing::info!("Keystore SET: service={}, key={}", full_service, key);
+
         // keyring — синхронный API, выносим в spawn_blocking
         let svc = full_service.clone();
         let k = key.to_string();
@@ -43,6 +45,7 @@ impl KeystorePort for DesktopKeystore {
         .await
         .map_err(|e| echat_core::Error::Keystore(e.to_string()))??;
 
+        tracing::info!("Keystore SET OK: service={}, key={}", full_service, key);
         Ok(())
     }
 
@@ -51,6 +54,8 @@ impl KeystorePort for DesktopKeystore {
 
         let full_service = format!("echat.{}", service);
         let k = key.to_string();
+
+        tracing::info!("Keystore GET: service={}, key={}", full_service, key);
 
         let result = tokio::task::spawn_blocking(move || {
             let entry = keyring::Entry::new(&full_service, &k)
@@ -65,8 +70,11 @@ impl KeystorePort for DesktopKeystore {
         .map_err(|e| echat_core::Error::Keystore(e.to_string()))??;
 
         match result {
-            None => Ok(None),
+            None => {
+                Ok(None)
+            }
             Some(encoded) => {
+                tracing::info!("Keystore GET OK: service={}, key={}", service, key);
                 let bytes = STANDARD
                     .decode(&encoded)
                     .map_err(|e| echat_core::Error::Keystore(format!("base64 decode: {}", e)))?;

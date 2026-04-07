@@ -38,14 +38,19 @@ impl EchatApp {
         let mut rt = AsyncRuntime::new();
         rt.set_ctx(cc.egui_ctx.clone());
 
-        Self {
+        let mut app = Self {
             rt,
             app_state: None,
             account_id: None,
             ui: UiState::default(),
             _sync_handle: None,
             _sync_cmd_tx: None,
-        }
+        };
+
+        // Пробуем автоматически войти с последним аккаунтом
+        app.try_auto_login();
+
+        app
     }
 }
 
@@ -112,8 +117,16 @@ impl EchatApp {
             }
 
             AppEvent::AccountError(e) => {
-                self.ui.login.is_loading = false;
-                self.ui.login.error = Some(e);
+                // Не показываем ошибки во время авто-входа
+                if !self.ui.login.is_auto_login {
+                    self.ui.login.is_loading = false;
+                    self.ui.login.error = Some(e);
+                }
+            }
+
+            AppEvent::AutoLoginComplete => {
+                // Завершили авто-вход, теперь можно показывать ошибки
+                self.ui.login.is_auto_login = false;
             }
 
             // ── Беседы ────────────────────────────────────────────────────
@@ -291,6 +304,35 @@ impl EchatApp {
 // ── Отрисовка ─────────────────────────────────────────────────────────────────
 
 impl EchatApp {
+    /// Пробует автоматически войти с последним сохранённым аккаунтом.
+    fn try_auto_login(&mut self) {
+        let sender = self.rt.event_sender();
+        let db_path = app_db_path();
+        let config = AppConfig::default();
+
+        // Устанавливаем флаг что идёт авто-вход
+        self.ui.login.is_auto_login = true;
+
+        self.rt.spawn(async move {
+            match platform::restore_last_session(&db_path, config).await {
+                Ok(Some((state, account))) => {
+                    tracing::info!("Автоматический вход в аккаунт {}", account.email);
+                    sender.send(AppEvent::AccountReady { state, account });
+                }
+                Ok(None) => {
+                    tracing::info!("Нет сохранённых аккаунтов, показываем экран входа");
+                    // Остаёмся на экране Login, сбрасываем флаг
+                    sender.send(AppEvent::AutoLoginComplete);
+                }
+                Err(e) => {
+                    tracing::warn!("Ошибка восстановления сессии: {}", e);
+                    // При ошибке авто-входа просто переходим к обычному входу
+                    sender.send(AppEvent::AutoLoginComplete);
+                }
+            }
+        });
+    }
+
     fn draw_login(&mut self, ctx: &Context) {
         let sender = self.rt.event_sender();
         CentralPanel::default()
@@ -426,11 +468,11 @@ impl EchatApp {
             // Добавляем аккаунт (или получаем существующий)
             let account = match state
                 .account_service
-                .add_account(email.clone(), password, provider)
+                .add_account(email.clone(), password.clone(), provider)
                 .await
             {
                 Ok(acc) => acc,
-                // Уже существует — загружаем и убеждаемся что keypair есть
+                // Уже существует — загружаем и убеждаемся что credentials есть
                 Err(echat_core::Error::AlreadyExists(_)) => {
                     match state.account_service.list_accounts().await {
                         Ok(list) if !list.is_empty() => {
@@ -444,6 +486,16 @@ impl EchatApp {
                                     return;
                                 }
                             };
+                            // Сохраняем пароль в keystore (перезаписываем)
+                            if let Err(e) = state
+                                .account_service
+                                .save_app_password(&email, &password)
+                                .await
+                            {
+                                tracing::warn!("Не удалось сохранить пароль в keystore: {}", e);
+                                // Не считаем это критичной ошибкой — продолжаем
+                            }
+                            
                             // Генерируем keypair если отсутствует
                             if let Err(e) =
                                 state.account_service.load_or_create_keypair(acc.id).await

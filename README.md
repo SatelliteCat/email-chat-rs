@@ -1,11 +1,21 @@
 
 # БД
 
-Выполнение миграций
+## Выполнение миграций
+
+### win
 
 `$env:DATABASE_URL="sqlite://crates/storage/storage.db"; sqlx migrate run --source crates/storage/migrations`
 
 `$env:DATABASE_URL="sqlite://crates/storage/storage.db"; cargo sqlx prepare --workspace`
+
+### linux
+
+При первом запуске `env DATABASE_URL="sqlite://crates/storage/storage.db" sqlx database setup --source crates/storage/migrations`
+
+`DATABASE_URL="sqlite://crates/storage/storage.db" sqlx migrate run --source crates/storage/storage.db`
+
+`DATABASE_URL="sqlite://crates/storage/storage.db" cargo sqlx prepare --workspace`
 
 
 Тестирование

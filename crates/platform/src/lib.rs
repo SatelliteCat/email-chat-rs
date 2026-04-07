@@ -62,7 +62,7 @@ pub async fn build_app_state(
     if let Ok(account) = db.accounts().get_by_email(email_addr).await {
         provider_config.echat_folder = account.echat_folder;
     }
-    
+
     let email_client = email::EmailClient::connect(provider_config).await?;
     let email_adapter = EmailAdapter::new(email_client);
 
@@ -73,4 +73,67 @@ pub async fn build_app_state(
     let state = AppState::new(email_adapter, storage_adapter, keystore, config);
 
     Ok(state)
+}
+
+/// Восстанавливает последнюю сессию из сохранённых данных.
+///
+/// Проверяет базу данных на наличие сохранённых аккаунтов,
+/// загружает последний использованный аккаунт и восстанавливает
+/// credentials из OS keystore.
+///
+/// Возвращает None если нет сохранённых аккаунтов или не удалось
+/// восстановить credentials.
+pub async fn restore_last_session(
+    db_path: &str,
+    config: AppConfig,
+) -> anyhow::Result<Option<(AppState, echat_core::models::account::Account)>> {
+    // 1. Открываем базу данных
+    let db = storage::Database::open(db_path).await?;
+    let storage_adapter = StorageAdapter::new(db.clone());
+    let keystore = PlatformKeystore::new();
+
+    // 2. Создаём временный AccountService для работы с keystore
+    let account_svc =
+        echat_core::services::account::AccountService::new(storage_adapter.clone(), keystore);
+
+    // 3. Получаем список всех аккаунтов
+    let accounts = match account_svc.list_accounts().await {
+        Ok(accs) => accs,
+        Err(e) => {
+            tracing::warn!("Не удалось загрузить аккаунты: {}", e);
+            return Ok(None);
+        }
+    };
+
+    if accounts.is_empty() {
+        tracing::info!("Нет сохранённых аккаунтов");
+        return Ok(None);
+    }
+
+    // 4. Берём последний аккаунт (предполагаем что он последний в списке)
+    let account = accounts.last().ok_or_else(|| anyhow::anyhow!("Пустой список аккаунтов"))?;
+
+    // 5. Восстанавливаем app_password из keystore
+    tracing::info!("Пытаемся восстановить пароль для {}", account.email);
+    let app_password = match account_svc.get_app_password(&account.email).await {
+        Ok(pwd) => {
+            tracing::info!("Пароль успешно восстановлен для {}", account.email);
+            pwd
+        }
+        Err(e) => {
+            tracing::warn!("Не удалось восстановить пароль для {}: {}", account.email, e);
+            return Ok(None);
+        }
+    };
+
+    // 6. Убеждаемся что identity keypair существует
+    account_svc
+        .load_or_create_keypair(account.id)
+        .await?;
+
+    // 7. Строим полноценный AppState
+    let state = build_app_state(&account.email, &app_password, db_path, config).await?;
+
+    tracing::info!("Восстановлена сессия для аккаунта {}", account.email);
+    Ok(Some((state, account.clone())))
 }

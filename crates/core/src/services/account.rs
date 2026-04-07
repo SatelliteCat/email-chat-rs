@@ -31,6 +31,20 @@ impl AccountService {
         &self.storage
     }
 
+    /// Сохраняет app_password в keystore для указанного email.
+    pub async fn save_app_password(&self, email: &str, password: &str) -> Result<()> {
+        tracing::info!("Сохраняем пароль в keystore для {}", email);
+        self.keystore
+            .set(
+                SERVICE_MAIL,
+                &app_password_key(email),
+                password.as_bytes(),
+            )
+            .await?;
+        tracing::info!("Пароль успешно сохранён для {}", email);
+        Ok(())
+    }
+
     /// Добавляет новый аккаунт.
     ///
     /// 1. Проверяет что аккаунта с таким email ещё нет
@@ -57,6 +71,7 @@ impl AccountService {
         let (imap_host, imap_port, smtp_host, smtp_port) = provider_config(&provider);
 
         // Сохраняем app_password в keystore
+        tracing::info!("add_account: сохраняем пароль для {} (id={})", email, id);
         self.keystore
             .set(
                 SERVICE_MAIL,
@@ -64,6 +79,7 @@ impl AccountService {
                 app_password.as_bytes(),
             )
             .await?;
+        tracing::info!("add_account: пароль сохранён в keystore для {}", email);
 
         // Генерируем identity keypair и сохраняем seed
         let keypair = encryption::keypair::IdentityKeypair::generate();

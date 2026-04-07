@@ -1,3 +1,9 @@
 {
-  "$version": 3
+  "$version": 3,
+  "permissions": {
+    "allow": [
+      "Bash(cargo check *)",
+      "Bash(cargo build *)"
+    ]
+  }
 }

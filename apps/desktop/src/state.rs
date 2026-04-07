@@ -135,6 +135,8 @@ pub struct LoginState {
     pub show_password: bool,
     pub is_loading: bool,
     pub error: Option<String>,
+    /// Идёт процесс автоматического входа (не показывать ошибки)
+    pub is_auto_login: bool,
 }
 
 /// Элемент списка бесед в сайдбаре.

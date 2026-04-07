@@ -29,6 +29,8 @@ pub enum AppEvent {
         account: Account,
     },
     AccountError(String),
+    /// Автоматический вход завершён (нет аккаунтов или ошибка)
+    AutoLoginComplete,
 
     // ── Данные ────────────────────────────────────────────────────────────
     ConversationsLoaded(Vec<Conversation>),
