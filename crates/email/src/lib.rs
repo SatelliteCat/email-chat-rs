@@ -127,13 +127,23 @@ impl EmailClient {
         })
     }
 
-    /// Отправляет исходящее сообщение и сохраняет копию в папку.
+    /// Отправляет исходящее сообщение и сохраняет копию в папку EChat.
     pub async fn send_message(&self, msg: OutgoingMessage) -> Result<()> {
-        // Отправляем через SMTP и получаем сырые байты
-        let _ = self.smtp.send(&msg, &self.config).await?;
+        // Отправляем через SMTP и получаем сырые байты письма
+        let email_bytes = self.smtp.send(&msg, &self.config).await?;
 
-        // Убеждаемся что папка существует перед сохранением
+        // Убеждаемся что папка существует
         self.imap_ops.ensure_folder(&self.config.echat_folder).await?;
+
+        // Сохраняем копию письма в папку EChat через IMAP APPEND
+        self.imap_ops
+            .append_message(&self.config.echat_folder, &email_bytes)
+            .await?;
+
+        tracing::info!(
+            "Письмо отправлено и сохранено в папку {}",
+            self.config.echat_folder
+        );
 
         Ok(())
     }
