@@ -58,12 +58,28 @@ impl eframe::App for EchatApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.poll_events();
         self.ui.expire_toasts();
-        
+
         // Проверка флага принудительной синхронизации
         if self.ui.force_sync {
             self.ui.force_sync = false;
             if let Some(ref cmd_tx) = self._sync_cmd_tx {
                 let _ = cmd_tx.try_send(echat_core::sync::engine::SyncCommand::FetchNow);
+            }
+        }
+
+        // Периодическое обновление: каждые 5 секунд подтягиваем сообщения
+        // для открытого диалога и каждые 15 секунд — список бесед.
+        // Это страхует от потери событий EventBus (broadcast lag).
+        if self.ui.screen == Screen::Main {
+            if self.ui.should_refresh_chat(5) {
+                if let Some(conv_id) = self.ui.selected_conv_id {
+                    self.ui.mark_chat_refreshed();
+                    self.refresh_current_chat(conv_id);
+                }
+            }
+            if self.ui.should_refresh_conversations(15) {
+                self.ui.mark_conversations_refreshed();
+                self.load_conversations();
             }
         }
 
@@ -180,10 +196,36 @@ impl EchatApp {
 
             AppEvent::HistoryLoaded { conv_id, messages } => {
                 if self.ui.selected_conv_id == Some(conv_id) {
-                    self.ui.chat.messages = messages;
-                    self.ui.chat.loaded_conv_id = Some(conv_id);
-                    self.ui.chat.is_loading_history = false;
-                    self.ui.chat.scroll_to_bottom = true;
+                    // Если загруженный список пустой — ничего не делаем.
+                    // Если в UI уже есть сообщения (периодический refresh) —
+                    // добавляем только новые, иначе — заменяем полностью.
+                    if messages.is_empty() {
+                        self.ui.chat.is_loading_history = false;
+                    } else if self.ui.chat.messages.is_empty()
+                        || self.ui.chat.loaded_conv_id != Some(conv_id)
+                    {
+                        // Первая загрузка — заменяем полностью
+                        self.ui.chat.messages = messages;
+                        self.ui.chat.loaded_conv_id = Some(conv_id);
+                        self.ui.chat.is_loading_history = false;
+                        self.ui.chat.scroll_to_bottom = true;
+                    } else {
+                        // Периодическое обновление — добавляем только новые
+                        let existing: std::collections::HashSet<Uuid> =
+                            self.ui.chat.messages.iter().map(|m| m.id).collect();
+                        let mut added = 0;
+                        for msg in messages {
+                            if !existing.contains(&msg.id) {
+                                self.ui.chat.messages.push(msg);
+                                added += 1;
+                            }
+                        }
+                        if added > 0 {
+                            // Сортируем по sent_at (старые первые)
+                            self.ui.chat.messages.sort_by_key(|m| m.sent_at);
+                            self.ui.chat.scroll_to_bottom = true;
+                        }
+                    }
                 }
             }
 
@@ -602,6 +644,43 @@ impl EchatApp {
                     messages: msgs,
                 }),
                 Err(e) => tracing::warn!("Ошибка загрузки истории: {}", e),
+            }
+        });
+    }
+
+    /// Обновить сообщения в текущем открытом диалоге из БД.
+    /// В отличие от `load_history` не ставит флаги загрузки и не вызывает
+    /// лишних перерисовок — просто тихо подтягивает актуальные данные.
+    fn refresh_current_chat(&mut self, conv_id: Uuid) {
+        // Не обновляем если пользователь ушёл с экрана Main или выбрал другой диалог
+        if self.ui.selected_conv_id != Some(conv_id) {
+            return;
+        }
+        let (state, _) = match self.services() {
+            Some(x) => x,
+            None => return,
+        };
+        let sender = self.rt.event_sender();
+
+        // Запоминаем текущие ID чтобы избежать дубликатов
+        let existing_ids: Vec<Uuid> = self.ui.chat.messages.iter().map(|m| m.id).collect();
+
+        self.rt.spawn(async move {
+            match state.chat_service.get_history(conv_id, None, 200).await {
+                Ok(msgs) => {
+                    // Фильтруем только новые сообщения
+                    let new_msgs: Vec<_> = msgs
+                        .into_iter()
+                        .filter(|m| !existing_ids.contains(&m.id))
+                        .collect();
+                    if !new_msgs.is_empty() {
+                        sender.send(AppEvent::HistoryLoaded {
+                            conv_id,
+                            messages: new_msgs,
+                        });
+                    }
+                }
+                Err(e) => tracing::warn!("Ошибка обновления истории: {}", e),
             }
         });
     }

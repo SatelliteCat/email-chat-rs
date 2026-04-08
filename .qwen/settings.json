@@ -3,7 +3,9 @@
   "permissions": {
     "allow": [
       "Bash(cargo check *)",
-      "Bash(cargo build *)"
+      "Bash(cargo build *)",
+      "Bash(ls *)",
+      "Bash(sha256sum *)"
     ]
   }
 }

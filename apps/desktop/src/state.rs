@@ -72,6 +72,12 @@ pub struct UiState {
     pub sync_error: Option<String>,
     /// Флаг для принудительной синхронизации
     pub force_sync: bool,
+
+    // ── Периодическое обновление ─────────────────────────────────────────────
+    /// Время последнего обновления текущего диалога из БД
+    last_chat_refresh: Option<chrono::DateTime<Utc>>,
+    /// Время последнего обновления списка бесед из БД
+    last_conversations_refresh: Option<chrono::DateTime<Utc>>,
 }
 
 impl UiState {
@@ -79,6 +85,36 @@ impl UiState {
     pub fn selected_conversation(&self) -> Option<&ConversationItem> {
         let id = self.selected_conv_id?;
         self.conversations.iter().find(|c| c.id == id)
+    }
+
+    /// Проверяет, нужно ли обновить сообщения текущего диалога из БД.
+    /// Возвращает `true` если прошло больше `interval_secs` с последнего обновления.
+    pub fn should_refresh_chat(&self, interval_secs: i64) -> bool {
+        if self.selected_conv_id.is_none() {
+            return false;
+        }
+        match self.last_chat_refresh {
+            None => true,
+            Some(t) => (Utc::now() - t).num_seconds() >= interval_secs,
+        }
+    }
+
+    /// Отмечает, что обновление текущего диалога выполнено.
+    pub fn mark_chat_refreshed(&mut self) {
+        self.last_chat_refresh = Some(Utc::now());
+    }
+
+    /// Проверяет, нужно ли обновить список бесед из БД.
+    pub fn should_refresh_conversations(&self, interval_secs: i64) -> bool {
+        match self.last_conversations_refresh {
+            None => true,
+            Some(t) => (Utc::now() - t).num_seconds() >= interval_secs,
+        }
+    }
+
+    /// Отмечает, что обновление списка бесед выполнено.
+    pub fn mark_conversations_refreshed(&mut self) {
+        self.last_conversations_refresh = Some(Utc::now());
     }
 
     /// Добавляет toast-уведомление.
@@ -106,13 +142,31 @@ impl UiState {
 
     /// Добавляет или обновляет сообщение в открытом чате.
     pub fn push_message(&mut self, conv_id: Uuid, msg: Message) {
-        // Обновляем список бесед
+        // Обновляем или создаём элемент списка бесед
         if let Some(conv) = self.conversations.iter_mut().find(|c| c.id == conv_id) {
             conv.last_preview = msg.body.clone().unwrap_or_default();
             conv.last_msg_at = Some(msg.sent_at);
             if self.selected_conv_id != Some(conv_id) {
                 conv.unread += 1;
             }
+        } else {
+            // Беседа ещё не добавлена в UI — создаём заглушку.
+            // Полные данные подтянутся при следующей ConversationsLoaded.
+            self.conversations.push(ConversationItem {
+                id: conv_id,
+                display_name: "Загрузка...".to_string(),
+                last_preview: msg.body.clone().unwrap_or_default(),
+                last_msg_at: Some(msg.sent_at),
+                unread: if self.selected_conv_id != Some(conv_id) {
+                    1
+                } else {
+                    0
+                },
+                avatar_letter: '?',
+            });
+            // Сортируем: самые свежие сверху
+            self.conversations
+                .sort_by(|a, b| b.last_msg_at.cmp(&a.last_msg_at));
         }
 
         // Если беседа открыта — добавляем сообщение
