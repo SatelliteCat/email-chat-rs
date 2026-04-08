@@ -128,6 +128,19 @@ impl EchatApp {
                 // Подписываемся на события ядра
                 subscribe_to_core_events(event_bus, self.rt.event_sender(), self.rt.rt());
 
+                // Запускаем восстановление истории диалогов
+                if let Some(state_clone) = self.app_state.clone() {
+                    let account_id = self.account_id.unwrap();
+                    let sender = self.rt.event_sender().clone();
+                    self.rt.rt().spawn(async move {
+                        tracing::info!("Запуск восстановления истории диалогов...");
+                        let stats = state_clone.restore_dialog_history(account_id).await;
+                        tracing::info!("Восстановление истории завершено: {:?}", stats);
+                        // Уведомляем UI о завершении
+                        let _ = sender.send(AppEvent::HistoryRestoreComplete { stats });
+                    });
+                }
+
                 self.load_conversations();
                 self.load_contacts();
             }
@@ -340,6 +353,19 @@ impl EchatApp {
             AppEvent::SyncError(e) => {
                 tracing::warn!("Sync error: {}", e);
                 self.ui.sync_error = Some(e);
+            }
+
+            AppEvent::HistoryRestoreComplete { stats } => {
+                tracing::info!(
+                    "Восстановление истории: всего {}, обработано {}, расшифровано {}, зашифровано {}, дубликатов {}, ошибок {}",
+                    stats.total_emails,
+                    stats.processed,
+                    stats.decrypted,
+                    stats.encrypted_stored,
+                    stats.duplicates,
+                    stats.errors
+                );
+                // Можно показать уведомление в UI если нужно
             }
 
             AppEvent::DeleteConversation { conv_id } => {

@@ -43,6 +43,12 @@ pub trait EmailTransport: Send + Sync + 'static {
     /// Получает новые письма из папки EChat начиная с UID.
     async fn fetch_new(&self, since_uid: Option<u32>) -> Result<Vec<IncomingEmail>>;
 
+    /// Получает все сообщения из папки EChat.
+    ///
+    /// Используется для восстановления истории диалогов.
+    /// Если `since_uid` = None — получает все письма в папке.
+    async fn restore_history(&self, since_uid: Option<u32>) -> Result<Vec<IncomingEmail>>;
+
     /// Ожидает новых писем через IMAP IDLE.
     /// Возвращает `true` если пришло новое письмо, `false` при таймауте.
     async fn idle_wait(&self) -> Result<bool>;

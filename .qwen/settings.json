@@ -5,7 +5,9 @@
       "Bash(cargo check *)",
       "Bash(cargo build *)",
       "Bash(ls *)",
-      "Bash(sha256sum *)"
+      "Bash(sha256sum *)",
+      "Bash(sed *)",
+      "Bash(cargo test *)"
     ]
   }
 }

@@ -14,6 +14,7 @@ use uuid::Uuid;
 use echat_core::{
     AppState, ChatEvent,
     models::{account::Account, contact::Contact, conversation::Conversation, message::Message},
+    services::history_restorer::RestoreStats,
 };
 
 /// Все события из async-задач → UI.
@@ -115,6 +116,11 @@ pub enum AppEvent {
     // ── Синхронизация ─────────────────────────────────────────────────────
     SyncConnected(bool),
     SyncError(String),
+
+    // ── Восстановление истории ────────────────────────────────────────────
+    HistoryRestoreComplete {
+        stats: RestoreStats,
+    },
 }
 
 // AppState не реализует Debug автоматически — обходим вручную
@@ -130,6 +136,13 @@ impl std::fmt::Debug for AppEvent {
             }
             AppEvent::NewMessage { conv_id, .. } => write!(f, "NewMessage(conv={})", conv_id),
             AppEvent::MessageSent { conv_id, .. } => write!(f, "MessageSent(conv={})", conv_id),
+            AppEvent::HistoryRestoreComplete { stats } => {
+                write!(
+                    f,
+                    "HistoryRestoreComplete(decrypted={}, encrypted={})",
+                    stats.decrypted, stats.encrypted_stored
+                )
+            }
             other => write!(f, "{:?}", std::mem::discriminant(other)),
         }
     }

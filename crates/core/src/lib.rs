@@ -209,4 +209,47 @@ impl AppState {
 
         (cmd_tx, future)
     }
+
+    /// Восстанавливает историю диалогов из папки EChat.
+    ///
+    /// Вызывается после авторизации для обработки существующих писем.
+    pub async fn restore_dialog_history(
+        &self,
+        account_id: uuid::Uuid,
+    ) -> services::history_restorer::RestoreStats {
+        tracing::info!("Запуск восстановления истории диалогов для аккаунта {}", account_id);
+
+        let email = self.email.clone();
+        let storage = self.storage.clone();
+        let keystore = self.keystore.clone();
+        let events = self.events.clone();
+
+        let account_svc = services::account::AccountService::new(storage.clone(), keystore.clone());
+        let chat_svc = services::chat::ChatService::new(
+            storage.clone(),
+            email.clone(),
+            services::account::AccountService::new(storage.clone(), keystore.clone()),
+            events.clone(),
+            AppConfig::default().app_download_url,
+        );
+
+        let restorer = services::history_restorer::HistoryRestorer::new(
+            storage,
+            email,
+            account_svc,
+            chat_svc,
+            events,
+        );
+
+        match restorer.restore_history(account_id).await {
+            Ok(stats) => {
+                tracing::info!("Восстановление истории завершено: {:?}", stats);
+                stats
+            }
+            Err(e) => {
+                tracing::error!("Ошибка восстановления истории: {}", e);
+                services::history_restorer::RestoreStats::default()
+            }
+        }
+    }
 }

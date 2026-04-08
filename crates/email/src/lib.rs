@@ -146,6 +146,19 @@ impl EmailClient {
         self.imap_sync.fetch_new(&self.config, since_uid).await
     }
 
+    /// Получает все сообщения из папки echat.
+    ///
+    /// Используется для восстановления истории диалогов.
+    /// Если `since_uid` = None — получает все письма в папке.
+    pub async fn fetch_from_echat_folder(
+        &self,
+        since_uid: Option<MessageUid>,
+    ) -> Result<Vec<IncomingMessage>> {
+        self.imap_sync
+            .fetch_from_folder(&self.config, &self.config.echat_folder, since_uid)
+            .await
+    }
+
     /// Запускает IMAP IDLE — блокирует до прихода нового письма
     /// или истечения таймаута (обычно 29 минут по RFC).
     ///

@@ -54,6 +54,18 @@ impl EmailTransport for EmailAdapter {
         Ok(messages.into_iter().map(incoming_to_core).collect())
     }
 
+    async fn restore_history(&self, since_uid: Option<u32>) -> Result<Vec<IncomingEmail>> {
+        let since = since_uid.map(email::types::MessageUid);
+
+        let messages = self
+            .client
+            .fetch_from_echat_folder(since)
+            .await
+            .map_err(|e| Error::Transport(e.to_string()))?;
+
+        Ok(messages.into_iter().map(incoming_to_core).collect())
+    }
+
     async fn idle_wait(&self) -> Result<bool> {
         self.client
             .idle_wait()

@@ -49,7 +49,7 @@ impl ImapConnection {
         })
     }
 
-    /// Получает новые письма из папки EChat начиная с UID.
+    /// Получает новые письма из папки начиная с UID.
     ///
     /// Если `since_uid` = None — получает все письма в папке.
     pub async fn fetch_new(
@@ -57,11 +57,22 @@ impl ImapConnection {
         config: &ProviderConfig,
         since_uid: Option<MessageUid>,
     ) -> Result<Vec<IncomingMessage>> {
+        self.fetch_from_folder(config, "INBOX", since_uid).await
+    }
+
+    /// Получает все письма из указанной папки.
+    ///
+    /// Если `since_uid` = None — получает все письма в папке.
+    pub async fn fetch_from_folder(
+        &self,
+        config: &ProviderConfig,
+        folder: &str,
+        since_uid: Option<MessageUid>,
+    ) -> Result<Vec<IncomingMessage>> {
         let mut guard = self.inner.lock().await;
         let session = self.get_or_reconnect(&mut guard, config).await?;
 
-        // Выбираем папку INBOX для получения новых писем
-        let folder = "INBOX";
+        // Выбираем нужную папку
         session
             .select(folder)
             .await
@@ -88,8 +99,6 @@ impl ImapConnection {
         // Формируем UID SET из найденных UID
         let uid_list: Vec<String> = uids.iter().map(|u| u.to_string()).collect();
         let fetch_set = uid_list.join(",");
-
-        // Загружаем письма: заголовки + тело
         let messages_stream = session
             .uid_fetch(&fetch_set, "(UID RFC822.HEADER RFC822.TEXT INTERNALDATE)")
             .await
@@ -101,7 +110,7 @@ impl ImapConnection {
             .await
             .map_err(|e| Error::Imap(e.to_string()))?;
 
-        let folder_name = folder.clone();
+        let folder_name = folder.to_string();
         let mut result = Vec::new();
         for msg in raw_messages {
             match parse_imap_message(&msg, &folder_name) {
