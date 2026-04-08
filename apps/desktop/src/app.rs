@@ -129,6 +129,21 @@ impl EchatApp {
                 self.ui.login.is_auto_login = false;
             }
 
+            AppEvent::Logout => {
+                self.spawn_logout();
+            }
+
+            AppEvent::LogoutComplete => {
+                // Очищаем всё UI состояние
+                self.app_state = None;
+                self.account_id = None;
+                self.ui = UiState::default();
+                self._sync_handle = None;
+                self._sync_cmd_tx = None;
+                self.ui.screen = Screen::Login;
+                self.ui.toast_info("Вы вышли из аккаунта");
+            }
+
             // ── Беседы ────────────────────────────────────────────────────
             AppEvent::ConversationsLoaded(convs) => {
                 let contacts = &self.ui.contacts;
@@ -359,7 +374,7 @@ impl EchatApp {
             .max_width(400.0)
             .frame(Frame::none())
             .show(ctx, |ui| {
-                if let Some(conv_id) = sidebar::show(ui, &mut self.ui) {
+                if let Some(conv_id) = sidebar::show(ui, &mut self.ui, &sender) {
                     self.select_conversation(conv_id);
                 }
             });
@@ -810,7 +825,7 @@ impl EchatApp {
             {
                 Ok(()) => {
                     sender.send(AppEvent::TheirPublicKeySet { conv_id });
-                    
+
                     // Перезагружаем контакты чтобы обновить статус
                     match state.contact_service.list_contacts(account_id).await {
                         Ok(contacts) => sender.send(AppEvent::ContactsLoaded(contacts)),
@@ -819,6 +834,24 @@ impl EchatApp {
                 }
                 Err(e) => sender.send(AppEvent::KeysError(e.to_string())),
             }
+        });
+    }
+
+    fn spawn_logout(&mut self) {
+        let (state, account_id) = match self.services() {
+            Some(x) => x,
+            None => return,
+        };
+        let sender = self.rt.event_sender();
+
+        self.rt.spawn(async move {
+            // Останавливаем SyncEngine (задача завершится когда cmd_tx будет dropped)
+            // Удаляем credentials из keystore и аккаунт из БД
+            if let Err(e) = state.account_service.delete_account(account_id).await {
+                tracing::warn!("Ошибка удаления аккаунта при выходе: {}", e);
+            }
+
+            sender.send(AppEvent::LogoutComplete);
         });
     }
 

@@ -8,12 +8,13 @@ use egui::{
 use uuid::Uuid;
 
 use crate::{
+    runtime::{AppEvent, EventSender},
     state::{ConversationItem, UiState},
     views::theme,
 };
 
 /// Рисует левую панель. Возвращает ID беседы если пользователь кликнул на неё.
-pub fn show(ui: &mut Ui, state: &mut UiState) -> Option<Uuid> {
+pub fn show(ui: &mut Ui, state: &mut UiState, sender: &EventSender) -> Option<Uuid> {
     let mut selected = None;
 
     Frame::none().fill(theme::BG_PANEL).show(ui, |ui| {
@@ -66,6 +67,22 @@ pub fn show(ui: &mut Ui, state: &mut UiState) -> Option<Uuid> {
                     });
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // Кнопка выхода
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("🚪")
+                                        .font(FontId::proportional(14.0))
+                                        .color(theme::ERROR),
+                                )
+                                .frame(false),
+                            )
+                            .on_hover_text("Выйти из аккаунта")
+                            .clicked()
+                        {
+                            sender.send(AppEvent::Logout);
+                        }
+
                         // Кнопка синхронизации
                         if ui
                             .add(
@@ -79,7 +96,7 @@ pub fn show(ui: &mut Ui, state: &mut UiState) -> Option<Uuid> {
                         {
                             state.force_sync = true;
                         }
-                        
+
                         if ui
                             .add(
                                 egui::Button::new(

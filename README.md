@@ -34,3 +34,13 @@
 ## Release (без консоли на Windows)
 
 `cargo build -p echat-desktop --release`
+
+## Crosscompiling
+
+`cargo build --target x86_64-pc-windows-gnu --release -p echat-desktop`
+
+### Зависимости
+
+`rustup target add x86_64-pc-windows-gnu`
+
+`sudo pacman -S mingw-w64-gcc`
