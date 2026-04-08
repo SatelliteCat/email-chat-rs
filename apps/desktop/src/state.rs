@@ -24,6 +24,13 @@ pub enum Screen {
     NewGroup,
 }
 
+/// Под-экран для настроек конкретной беседы
+#[derive(Clone, Debug, Default)]
+pub struct ConversationSettingsScreen {
+    /// ID беседы, настройки которой открыты
+    pub conv_id: Option<Uuid>,
+}
+
 impl Default for Screen {
     fn default() -> Self {
         Screen::Login
@@ -53,6 +60,9 @@ pub struct UiState {
 
     // ── Открытый чат ─────────────────────────────────────────────────────────
     pub chat: ChatUiState,
+
+    // ── Настройки беседы ─────────────────────────────────────────────────────
+    pub conversation_settings: ConversationSettingsScreen,
 
     // ── Контакты ─────────────────────────────────────────────────────────────
     pub contacts: Vec<Contact>,

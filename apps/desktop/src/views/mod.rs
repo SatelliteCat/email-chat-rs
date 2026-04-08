@@ -1,6 +1,7 @@
 pub mod chat;
 pub mod compose;
 pub mod contacts;
+pub mod conversation_settings;
 pub mod login;
 pub mod sidebar;
 

@@ -112,6 +112,12 @@ pub enum AppEvent {
     MyKeypairSeedImported {
         conv_id: Uuid,
     },
+    /// Открыть настройки беседы
+    OpenConversationSettings {
+        conv_id: Uuid,
+    },
+    /// Закрыть настройки беседы
+    CloseConversationSettings,
     KeysError(String),
 
     // ── Беседы ────────────────────────────────────────────────────────────

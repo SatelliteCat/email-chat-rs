@@ -15,7 +15,7 @@ use echat_core::{AppConfig, AppState, sync::engine::SyncCommand};
 use crate::{
     runtime::{AppEvent, AsyncRuntime, EventSender, subscribe_to_core_events},
     state::{ConversationItem, Screen, UiState},
-    views::{chat, compose, contacts, login, sidebar, theme},
+    views::{chat, compose, conversation_settings, contacts, login, sidebar, theme},
 };
 
 pub struct EchatApp {
@@ -373,6 +373,16 @@ impl EchatApp {
                 self.ui.toast_error(format!("Ошибка ключей: {}", e));
             }
 
+            AppEvent::OpenConversationSettings { conv_id } => {
+                self.ui.conversation_settings.conv_id = Some(conv_id);
+                // Загружаем ключи если ещё не загружены
+                self.spawn_load_conversation_keys(conv_id);
+            }
+
+            AppEvent::CloseConversationSettings => {
+                self.ui.conversation_settings.conv_id = None;
+            }
+
             // ── Синхронизация ─────────────────────────────────────────────
             AppEvent::SyncConnected(c) => {
                 self.ui.sync_connected = c;
@@ -475,11 +485,23 @@ impl EchatApp {
                 }
             });
 
-        // Правая часть — чат
+        // Правая часть — чат или настройки
         CentralPanel::default()
             .frame(Frame::none().fill(theme::BG_DARK))
             .show(ctx, |ui| {
-                if let Some(conv) = self.ui.selected_conversation().cloned() {
+                // Проверяем, открыты ли настройки беседы
+                if self.ui.conversation_settings.conv_id.is_some() {
+                    // Показываем настройки беседы
+                    if let Some(conv) = self.ui.selected_conversation().cloned() {
+                        conversation_settings::show(
+                            ui,
+                            &mut self.ui.conversation_settings,
+                            &mut self.ui.chat,
+                            &conv,
+                            &sender,
+                        );
+                    }
+                } else if let Some(conv) = self.ui.selected_conversation().cloned() {
                     // Поле ввода — снизу
                     TopBottomPanel::bottom("compose")
                         .exact_height(58.0)
