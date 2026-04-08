@@ -539,6 +539,26 @@ impl StoragePort for StorageAdapter {
             .map_err(map_storage_err)
     }
 
+    async fn update_conversation_my_keypair(
+        &self,
+        conversation_id: Uuid,
+        my_keypair_json: String,
+    ) -> CoreResult<()> {
+        use storage::models::{ConversationKeyStatus, UpdateConversationKeys};
+        self.db
+            .conversation_keys()
+            .update(
+                conversation_id,
+                &UpdateConversationKeys {
+                    my_keypair_json: Some(my_keypair_json),
+                    their_public_key_json: None,
+                    status: None,
+                },
+            )
+            .await
+            .map_err(map_storage_err)
+    }
+
     async fn are_conversation_keys_active(&self, conversation_id: Uuid) -> CoreResult<bool> {
         self.db
             .conversation_keys()

@@ -103,6 +103,15 @@ pub enum AppEvent {
     TheirPublicKeySet {
         conv_id: Uuid,
     },
+    /// Импортировать seed нашего ключа для восстановления истории
+    ImportMyKeypairSeed {
+        conv_id: Uuid,
+        seed_base64: String,
+    },
+    /// Seed нашего ключа импортирован
+    MyKeypairSeedImported {
+        conv_id: Uuid,
+    },
     KeysError(String),
 
     // ── Беседы ────────────────────────────────────────────────────────────

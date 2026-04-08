@@ -238,6 +238,8 @@ pub struct ChatUiState {
     pub my_public_key: String,
     /// Поле для вставки публичного ключа собеседника
     pub their_public_key_input: String,
+    /// Поле для вставки seed нашего ключа (для восстановления истории)
+    pub my_keypair_seed_input: String,
     /// Сообщение о статусе ключей
     pub keys_status_message: Option<String>,
 }
@@ -252,6 +254,7 @@ impl Default for ChatUiState {
             is_loading_history: false,
             my_public_key: String::new(),
             their_public_key_input: String::new(),
+            my_keypair_seed_input: String::new(),
             keys_status_message: None,
         }
     }

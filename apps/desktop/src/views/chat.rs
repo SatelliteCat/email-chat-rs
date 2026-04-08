@@ -121,6 +121,33 @@ fn encryption_keys_panel(ui: &mut Ui, chat: &mut ChatUiState, conv_id: Uuid, sen
 
             ui.add_space(10.0);
 
+            // Поле для вставки seed нашего ключа (для восстановления истории)
+            ui.label(
+                RichText::new("Ваш seed ключа (для расшифровки старых сообщений):")
+                    .font(FontId::proportional(11.0))
+                    .color(theme::TEXT_SECONDARY),
+            );
+            ui.add_space(4.0);
+
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut chat.my_keypair_seed_input)
+                        .hint_text("Вставьте base64 seed вашего ключа здесь...")
+                        .desired_width(300.0)
+                        .font(FontId::monospace(11.0)),
+                );
+                if ui.button("📥 Импортировать").clicked() {
+                    if !chat.my_keypair_seed_input.trim().is_empty() {
+                        sender.send(AppEvent::ImportMyKeypairSeed {
+                            conv_id,
+                            seed_base64: chat.my_keypair_seed_input.clone(),
+                        });
+                    }
+                }
+            });
+
+            ui.add_space(10.0);
+
             // Поле для вставки публичного ключа собеседника
             ui.label(
                 RichText::new("Публичный ключ собеседника:")

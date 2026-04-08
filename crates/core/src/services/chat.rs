@@ -375,7 +375,7 @@ impl ChatService {
         // Сохраняем как JSON (декодируем из base64)
         let their_keys = encryption::keypair::PublicKeys::from_base64(&their_public_key_base64)
             .map_err(|e| Error::Internal(format!("Ошибка парсинга ключа собеседника: {}", e)))?;
-        
+
         let their_key_json = serde_json::to_string(&their_keys)
             .map_err(|e| Error::Internal(format!("Ошибка сериализации ключа: {}", e)))?;
 
@@ -394,6 +394,74 @@ impl ChatService {
                 .complete_contact_handshake(contact_id, their_key_json)
                 .await?;
         }
+
+        Ok(())
+    }
+
+    /// Импортирует seed нашего ключа для диалога (для восстановления истории).
+    ///
+    /// Принимает base64-encoded seed, из которого можно восстановить IdentityKeypair.
+    /// Это позволяет расшифровать старые сообщения, если у пользователя есть backup ключей.
+    pub async fn import_my_keypair_seed(&self, conv_id: Uuid, seed_base64: String) -> Result<()> {
+        // Декодируем base64 seed
+        let seed_bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &seed_base64,
+        )
+        .map_err(|e| Error::Internal(format!("Ошибка декодирования base64 seed: {}", e)))?;
+
+        // Проверяем размер
+        let seed_array: [u8; 32] = seed_bytes
+            .try_into()
+            .map_err(|_| Error::Internal("Неверный размер seed: ожидается 32 байта".into()))?;
+
+        // Пытаемся создать keypair из seed (проверка валидности)
+        let keypair = encryption::keypair::IdentityKeypair::from_seed(
+            encryption::keypair::KeySeed::from_bytes(seed_array),
+        );
+
+        // Получаем публичные ключи для отображения
+        let public_keys = keypair.public_keys();
+        let public_keys_json = serde_json::to_string(&public_keys)
+            .map_err(|e| Error::Internal(format!("Ошибка сериализации публичных ключей: {}", e)))?;
+
+        // Сохраняем seed в conversation_keys
+        // Если ключи ещё не созданы, создаём их
+        match self.storage.get_conversation_keys(conv_id).await {
+            Ok(existing_keys) => {
+                // Ключи существуют — обновляем my_keypair_json
+                self.storage
+                    .update_conversation_my_keypair(conv_id, seed_base64.clone())
+                    .await?;
+
+                // Если их ключ уже был установлен, обновляем его публичный ключ
+                if let Some(their_key_json) = existing_keys.their_public_key_json {
+                    // Обновляем публичный ключ контакта
+                    if let Ok(conv) = self.storage.get_conversation(conv_id).await {
+                        if let crate::models::conversation::ConversationKind::Direct { contact_id } =
+                            conv.kind
+                        {
+                            let _ = self
+                                .storage
+                                .complete_contact_handshake(contact_id, their_key_json)
+                                .await;
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                // Ключей нет — создаём новые
+                self.storage
+                    .create_conversation_keys(conv_id, seed_base64.clone())
+                    .await?;
+            }
+        }
+
+        tracing::info!(
+            "Импортирован seed ключа для диалога {}. Публичный ключ: x25519={:x?}",
+            conv_id,
+            &public_keys.x25519[..4]
+        );
 
         Ok(())
     }

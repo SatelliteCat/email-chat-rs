@@ -312,6 +312,10 @@ impl EchatApp {
                 self.spawn_set_their_public_key(conv_id, public_key_json);
             }
 
+            AppEvent::ImportMyKeypairSeed { conv_id, seed_base64 } => {
+                self.spawn_import_my_keypair_seed(conv_id, seed_base64);
+            }
+
             AppEvent::ConversationKeysLoaded {
                 conv_id,
                 my_public_key,
@@ -339,6 +343,30 @@ impl EchatApp {
                 }
                 // Перезагружаем ключи
                 self.spawn_load_conversation_keys(conv_id);
+            }
+
+            AppEvent::MyKeypairSeedImported { conv_id } => {
+                if self.ui.selected_conv_id == Some(conv_id) {
+                    self.ui.chat.keys_status_message =
+                        Some("✅ Seed ключа импортирован — запускаю восстановление истории...".to_string());
+                    self.ui.toast_info("Seed ключа импортирован, восстанавливаю историю...");
+                    // Очищаем поле ввода
+                    self.ui.chat.my_keypair_seed_input = String::new();
+                }
+                // Перезагружаем ключи чтобы обновить UI
+                self.spawn_load_conversation_keys(conv_id);
+                
+                // Запускаем повторное восстановление истории для расшифровки старых сообщений
+                if let Some(state_clone) = self.app_state.clone() {
+                    let account_id = self.account_id.unwrap();
+                    let sender = self.rt.event_sender().clone();
+                    self.rt.rt().spawn(async move {
+                        tracing::info!("Повторное восстановление истории после импорта seed...");
+                        let stats = state_clone.restore_dialog_history(account_id).await;
+                        tracing::info!("Повторное восстановление завершено: {:?}", stats);
+                        let _ = sender.send(AppEvent::HistoryRestoreComplete { stats });
+                    });
+                }
             }
 
             AppEvent::KeysError(e) => {
@@ -938,6 +966,31 @@ impl EchatApp {
                     }
                 }
                 Err(e) => sender.send(AppEvent::KeysError(e.to_string())),
+            }
+        });
+    }
+
+    fn spawn_import_my_keypair_seed(&mut self, conv_id: Uuid, seed_base64: String) {
+        let state = match self.app_state.as_ref() {
+            Some(s) => s.clone(),
+            None => return,
+        };
+        let sender = self.rt.event_sender();
+
+        self.rt.spawn(async move {
+            // Импортируем seed ключа для диалога
+            match state
+                .chat_service
+                .import_my_keypair_seed(conv_id, seed_base64)
+                .await
+            {
+                Ok(()) => {
+                    sender.send(AppEvent::MyKeypairSeedImported { conv_id });
+                }
+                Err(e) => sender.send(AppEvent::KeysError(format!(
+                    "Ошибка импорта seed: {}",
+                    e
+                ))),
             }
         });
     }

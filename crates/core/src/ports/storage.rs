@@ -169,6 +169,11 @@ pub trait StoragePort: Send + Sync + 'static {
         conversation_id: Uuid,
         their_public_key_json: String,
     ) -> Result<()>;
+    async fn update_conversation_my_keypair(
+        &self,
+        conversation_id: Uuid,
+        my_keypair_json: String,
+    ) -> Result<()>;
     async fn are_conversation_keys_active(&self, conversation_id: Uuid) -> Result<bool>;
 
     // ── Сообщения ────────────────────────────────────────────────────────────
